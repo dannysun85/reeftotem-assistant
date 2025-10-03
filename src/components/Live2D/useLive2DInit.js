@@ -6,19 +6,20 @@ export const useLive2DInit = (loadLive2DCore) => {
     if (!canvasRef.current) return;
 
     try {
+      console.log('Live2D初始化开始...');
       setStatus('正在初始化Live2D框架...');
 
       const coreLoaded = await loadLive2DCore(setStatus, setError);
       if (!coreLoaded) {
         throw new Error('Live2D Core加载失败');
       }
+      console.log('Live2D Core加载成功');
 
       const { LAppDelegate } = await import('../../lib/live2d/src/lappdelegate');
 
-      setStatus('正在创建Live2D应用...');
-
       const appDelegate = LAppDelegate.getInstance();
       const success = await appDelegate.initialize();
+      console.log('LAppDelegate初始化结果:', success);
 
       if (success) {
         console.log('LAppDelegate初始化成功，准备设置角色');
@@ -41,6 +42,7 @@ export const useLive2DInit = (loadLive2DCore) => {
         // 启动渲染循环
         console.log('开始启动Live2D渲染循环');
         appDelegate.run();
+        console.log('Live2D渲染循环已启动');
 
         setIsLoaded(true);
         setStatus('Live2D初始化成功');

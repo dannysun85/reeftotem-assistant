@@ -236,6 +236,65 @@ export class LAppLive2DManager {
     this._models.pushBack(instance);
     this._character = character;
     console.log('LAppLive2DManager.changeCharacter: 角色切换完成');
+
+    // 延迟获取模型边界框并调整窗口
+    setTimeout(() => {
+      this.adjustWindowSizeToModel();
+    }, 3000);
+  }
+
+  /**
+   * 根据模型边界框调整窗口尺寸
+   */
+  public adjustWindowSizeToModel(): void {
+    const model: LAppModel = this._models.at(0);
+    if (!model || !model.getModel()) {
+      return;
+    }
+
+    try {
+      // 获取模型的Canvas宽高信息
+      const modelCanvasWidth = model.getModel().getCanvasWidth();
+      const modelCanvasHeight = model.getModel().getCanvasHeight();
+
+      // 基础尺寸 - 超紧凑设置
+      let modelWidth = 140;
+      let modelHeight = 220;
+
+      // 根据Canvas比例调整
+      if (modelCanvasWidth > 0 && modelCanvasHeight > 0) {
+        const aspectRatio = modelCanvasWidth / modelCanvasHeight;
+        if (aspectRatio > 1) {
+          // 横向较宽的模型 - 更严格控制宽度
+          modelWidth = Math.min(180, 140 * aspectRatio);
+          modelHeight = modelWidth / aspectRatio;
+        } else {
+          // 纵向较长的模型 - 严格控制高度
+          modelHeight = Math.min(260, 220 / aspectRatio);
+          modelWidth = modelHeight * aspectRatio;
+        }
+      }
+
+      // 超小边距 - 几乎无留白
+      modelWidth += 5;
+      modelHeight += 5;
+
+      // 确保最小尺寸 - 超紧凑最小尺寸
+      modelWidth = Math.max(modelWidth, 100);
+      modelHeight = Math.max(modelHeight, 160);
+
+      console.log(`LAppLive2DManager.adjustWindowSizeToModel: 调整窗口尺寸到 ${modelWidth}x${modelHeight}`);
+
+      // 调用Tauri命令调整窗口
+      if (window.__TAURI__?.invoke) {
+        window.__TAURI__.invoke('resize_live2d_window', {
+          width: Math.round(modelWidth),
+          height: Math.round(modelHeight)
+        });
+      }
+    } catch (error) {
+      console.error('调整窗口尺寸失败:', error);
+    }
   }
 
   /**

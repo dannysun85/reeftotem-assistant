@@ -1,5 +1,7 @@
 use tauri::{menu::{Menu, MenuItem, PredefinedMenuItem, Submenu}, tray::TrayIconBuilder, Manager, Emitter, AppHandle};
 use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::Duration;
 
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 #[tauri::command]
@@ -50,6 +52,17 @@ async fn show_live2d_window_with_animation(app: AppHandle) -> Result<(), String>
         if let Some(window) = app_clone.get_webview_window("live2d") {
             let _ = window.show();
             let _ = window.set_focus();
+
+            // 延迟定位到右下角
+            let app_clone2 = app_clone.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(100));
+                if let Err(e) = tauri::async_runtime::block_on(async {
+                    position_live2d_window(app_clone2).await
+                }) {
+                    eprintln!("定位Live2D窗口失败: {}", e);
+                }
+            });
         }
 
         // 向主窗口发送显示事件
@@ -109,8 +122,312 @@ async fn trigger_hide_animation(app: AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
+async fn position_live2d_window(app: AppHandle) -> Result<(), String> {
+    println!("开始定位Live2D窗口...");
+
+    if let Some(window) = app.get_webview_window("live2d") {
+        println!("找到Live2D窗口");
+
+        // 等待窗口完全准备好
+        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+
+        // 确保窗口可见
+        window.show().map_err(|e| e.to_string())?;
+        println!("窗口已设置为可见");
+
+        // 获取屏幕尺寸
+        if let Ok(monitor) = window.current_monitor() {
+            if let Some(monitor) = monitor {
+                let screen_size = monitor.size();
+                let window_size = window.inner_size().map_err(|e| e.to_string())?;
+
+                println!("屏幕尺寸: {}x{}", screen_size.width, screen_size.height);
+                println!("窗口尺寸: {}x{}", window_size.width, window_size.height);
+
+                // 计算右下角位置，留出边距避免遮挡
+                let margin_x = 120;
+                let margin_y = 120;
+                let x = screen_size.width as i32 - window_size.width as i32 - margin_x;
+                let y = screen_size.height as i32 - window_size.height as i32 - margin_y;
+
+                println!("计算位置: x={}, y={}", x, y);
+
+                // 确保窗口不会超出屏幕边界 - 使用更保守的边界检查
+                let final_x = x.max(50).min(screen_size.width as i32 - window_size.width as i32 - 50);
+                let final_y = y.max(50).min(screen_size.height as i32 - window_size.height as i32 - 50);
+
+                println!("最终定位Live2D窗口到: x={}, y={} (屏幕: {}x{}, 窗口: {}x{})",
+                    final_x, final_y,
+                    screen_size.width, screen_size.height,
+                    window_size.width, window_size.height);
+
+                // 设置窗口位置
+                window.set_position(tauri::Position::Physical(tauri::PhysicalPosition { x: final_x, y: final_y }))
+                    .map_err(|e| e.to_string())?;
+
+                // 确保窗口置顶
+                let _ = window.set_always_on_top(true);
+
+                // 再次确保窗口位置（防止被系统移动）
+                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                let _ = window.set_position(tauri::Position::Physical(tauri::PhysicalPosition { x: final_x, y: final_y }));
+
+                println!("窗口定位完成");
+            } else {
+                println!("无法获取显示器信息");
+            }
+        } else {
+            println!("无法获取当前显示器");
+        }
+    } else {
+        println!("无法找到Live2D窗口");
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn resize_live2d_window(app: AppHandle, width: f64, height: f64) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window("live2d") {
+        // 确保最小尺寸
+        let final_width = width.max(120.0);
+        let final_height = height.max(180.0);
+
+        // 设置窗口大小
+        window.set_size(tauri::Size::Physical(tauri::PhysicalSize {
+            width: final_width as u32,
+            height: final_height as u32,
+        })).map_err(|e| e.to_string())?;
+
+        // 短暂延迟后重新定位到右下角
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+        if let Err(e) = position_live2d_window(app).await {
+            eprintln!("重新定位窗口失败: {}", e);
+        }
+
+        println!("调整Live2D窗口尺寸到: {}x{}", final_width, final_height);
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn get_window_position(app: AppHandle) -> Result<(i32, i32), String> {
+    if let Some(window) = app.get_webview_window("live2d") {
+        let position = window.outer_position().map_err(|e| e.to_string())?;
+        Ok((position.x, position.y))
+    } else {
+        Err("无法获取Live2D窗口".to_string())
+    }
+}
+
+#[tauri::command]
+async fn set_window_position(app: AppHandle, x: i32, y: i32) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window("live2d") {
+        window.set_position(tauri::Position::Physical(tauri::PhysicalPosition { x, y }))
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
 async fn exit_app() -> Result<(), String> {
     std::process::exit(0);
+}
+
+// 窗口管理器结构 - 跨平台实现
+#[derive(Clone)]
+struct WindowManager {
+    is_dragging: Arc<Mutex<bool>>,
+    app_handle: AppHandle,
+}
+
+impl WindowManager {
+    fn new(app_handle: AppHandle) -> Self {
+        Self {
+            is_dragging: Arc::new(Mutex::new(false)),
+            app_handle,
+        }
+    }
+
+    fn start_global_mouse_tracking(&self) {
+        let is_dragging = self.is_dragging.clone();
+        let _app_handle = self.app_handle.clone();
+
+        thread::spawn(move || {
+            // 跨平台鼠标跟踪实现
+            println!("启动全局鼠标跟踪 (跨平台模式)");
+
+            loop {
+                // 检查是否处于拖拽状态
+                let should_track = {
+                    let is_dragging_guard = is_dragging.lock().unwrap();
+                    !*is_dragging_guard
+                };
+
+                if should_track {
+                    // 这里可以添加跨平台的鼠标位置获取逻辑
+                    // 由于我们已经在Web端实现了鼠标跟随，Rust端主要负责窗口管理
+                    // 所以我们可以简化这个实现，或者使用其他跨平台的方案
+
+                    // 暂时使用占位符，实际上鼠标跟随已经在Web端通过Tauri事件处理了
+                    // 我们可以在这里添加其他需要的功能，比如周期性状态检查
+                }
+
+                thread::sleep(Duration::from_millis(16)); // ~60fps
+            }
+        });
+    }
+}
+
+// 启动全局鼠标跟踪
+#[tauri::command]
+async fn start_mouse_tracking(app: AppHandle) -> Result<(), String> {
+    let window_manager = WindowManager::new(app);
+    window_manager.start_global_mouse_tracking();
+    Ok(())
+}
+
+// 开始手动拖拽 - 记录初始位置
+#[tauri::command]
+async fn start_manual_drag(app: AppHandle) -> Result<(), String> {
+    println!("开始手动拖拽");
+    if let Some(window) = app.get_webview_window("live2d") {
+        if let Ok(position) = window.outer_position() {
+            let _ = window.emit("drag_start", serde_json::json!({
+                "x": position.x,
+                "y": position.y
+            }));
+            println!("发送拖拽开始事件: x={}, y={}", position.x, position.y);
+        }
+    }
+    Ok(())
+}
+
+// 处理拖拽移动
+#[tauri::command]
+async fn handle_drag_move(app: AppHandle, x: i32, y: i32) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window("live2d") {
+        window.set_position(tauri::Position::Physical(tauri::PhysicalPosition { x, y }))
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+// 结束拖拽
+#[tauri::command]
+async fn end_drag(_app: AppHandle) -> Result<(), String> {
+    println!("结束拖拽");
+    // 这里可以添加拖拽结束的逻辑
+    Ok(())
+}
+
+// 设置窗口透明度
+#[tauri::command]
+async fn set_window_opacity(app: AppHandle, window_label: String, opacity: f64) -> Result<(), String> {
+    println!("设置窗口透明度: {} = {}", window_label, opacity);
+
+    if let Some(_window) = app.get_webview_window(&window_label) {
+        // Tauri 2.x 设置透明度的方法
+        // 注意：透明度设置在某些平台上可能有限制
+        // 这里我们暂时只是记录透明度设置，实际的透明度控制需要更复杂的实现
+        println!("窗口透明度设置完成: {} (实际效果将在后续版本实现)", opacity);
+        Ok(())
+    } else {
+        Err(format!("找不到窗口: {}", window_label))
+    }
+}
+
+// 切换窗口置顶状态
+#[tauri::command]
+async fn toggle_always_on_top(app: AppHandle) -> Result<bool, String> {
+    println!("切换窗口置顶状态");
+
+    if let Some(window) = app.get_webview_window("live2d") {
+        // 获取当前置顶状态
+        let current_topmost = window.is_always_on_top().map_err(|e| e.to_string())?;
+
+        // 切换状态
+        let new_topmost = !current_topmost;
+        window.set_always_on_top(new_topmost).map_err(|e| e.to_string())?;
+
+        println!("窗口置顶状态切换: {} -> {}", current_topmost, new_topmost);
+        Ok(new_topmost)
+    } else {
+        Err("找不到Live2D窗口".to_string())
+    }
+}
+
+// 重置窗口位置到右下角
+#[tauri::command]
+async fn reset_window_position(app: AppHandle) -> Result<(), String> {
+    println!("重置窗口位置到右下角");
+
+    if let Some(window) = app.get_webview_window("live2d") {
+        // 获取屏幕尺寸
+        if let Some(monitor) = window.current_monitor().map_err(|e| e.to_string())? {
+            let screen_size = monitor.size();
+
+            // 获取窗口尺寸
+            if let Ok(window_size) = window.outer_size() {
+                // 计算右下角位置（留出边距）
+                let margin = 50;
+                let x = screen_size.width as i32 - window_size.width as i32 - margin;
+                let y = screen_size.height as i32 - window_size.height as i32 - margin;
+
+                // 确保窗口不会超出屏幕边界
+                let final_x = x.max(50).min(screen_size.width as i32 - window_size.width as i32 - 50);
+                let final_y = y.max(50).min(screen_size.height as i32 - window_size.height as i32 - 50);
+
+                window.set_position(tauri::Position::Physical(tauri::PhysicalPosition {
+                    x: final_x,
+                    y: final_y
+                })).map_err(|e| e.to_string())?;
+
+                println!("窗口位置已重置到: x={}, y={}", final_x, final_y);
+                Ok(())
+            } else {
+                Err("无法获取窗口尺寸".to_string())
+            }
+        } else {
+            Err("无法获取屏幕信息".to_string())
+        }
+    } else {
+        Err("找不到Live2D窗口".to_string())
+    }
+}
+
+// 显示关于对话框
+#[tauri::command]
+async fn show_about_dialog() -> Result<String, String> {
+    println!("显示关于对话框");
+
+    let about_text = "ReefTotem Assistant v0.1.1\n\n一个基于Live2D的智能数字人助手\n\n技术栈：\n• Tauri 2.x\n• React + TypeScript\n• Live2D Cubism SDK\n\n© 2025 开发团队".to_string();
+
+    Ok(about_text)
+}
+
+// 手动窗口拖拽 - 处理透明窗口拖拽问题
+#[tauri::command]
+async fn start_window_drag(app: AppHandle) -> Result<(), String> {
+    println!("开始窗口拖拽命令被调用");
+    if let Some(window) = app.get_webview_window("live2d") {
+        println!("找到Live2D窗口");
+
+        // 首先尝试Tauri原生的拖拽方法
+        match window.start_dragging() {
+            Ok(()) => {
+                println!("窗口拖拽启动成功");
+                return Ok(());
+            },
+            Err(e) => {
+                println!("Tauri原生拖拽失败: {}, 尝试手动实现", e);
+                // 如果原生方法失败，返回成功但让前端处理
+                return Ok(());
+            }
+        }
+    } else {
+        println!("无法找到Live2D窗口");
+        return Err("无法找到Live2D窗口".to_string());
+    }
 }
 
 // 辅助函数：更新菜单状态
@@ -175,6 +492,19 @@ pub fn run() {
             hide_live2d_window,
             is_live2d_visible,
             trigger_hide_animation,
+            position_live2d_window,
+            resize_live2d_window,
+            get_window_position,
+            set_window_position,
+            start_mouse_tracking,
+            start_manual_drag,
+            handle_drag_move,
+            end_drag,
+            start_window_drag,
+            set_window_opacity,
+            toggle_always_on_top,
+            reset_window_position,
+            show_about_dialog,
             exit_app
         ])
         .setup(|app| {
@@ -183,6 +513,20 @@ pub fn run() {
             // 获取窗口引用
             let main_window = app.get_webview_window("main").unwrap();
             let live2d_window = app.get_webview_window("live2d").unwrap();
+
+            // 立即设置Live2D窗口位置到右下角
+            if let Err(e) = tauri::async_runtime::block_on(async {
+                position_live2d_window(app.handle().clone()).await
+            }) {
+                eprintln!("初始定位Live2D窗口失败: {}", e);
+            }
+
+            // 启动全局鼠标跟踪
+            if let Err(e) = tauri::async_runtime::block_on(async {
+                start_mouse_tracking(app.handle().clone()).await
+            }) {
+                eprintln!("启动全局鼠标跟踪失败: {}", e);
+            }
 
             // 创建菜单状态管理
             let menu_state = Arc::new(Mutex::new(MenuState::new()));

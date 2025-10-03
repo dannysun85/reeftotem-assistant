@@ -1,6 +1,5 @@
 import { useEffect } from 'react';
 import { CleanSimpleChat } from './components/CleanSimpleChat';
-import { WebGLTest } from './components/WebGLTest';
 
 // 安全的Tauri invoke函数
 const safeInvoke = async (command: string, args?: any) => {
@@ -42,9 +41,6 @@ function App() {
       <div className="p-4">
         <CleanSimpleChat />
       </div>
-
-      {/* WebGL测试 */}
-      <WebGLTest />
 
       {/* Live2D状态显示 */}
       <div className="fixed top-4 right-4 z-50 bg-white rounded-lg shadow-lg p-4">

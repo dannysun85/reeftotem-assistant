@@ -1,0 +1,40 @@
+{
+  "personas": {
+    "HaruGreeter": {
+      "id": "HaruGreeter",
+      "name": "Haru Greeter",
+      "modelPath": "/assets/live2d/characters/free/HaruGreeter/HaruGreeter.model3.json",
+      "textures": [],
+      "description": "Live2D Haru Greeter 角色",
+      "theme": {
+        "primaryColor": "#FF69B4",
+        "secondaryColor": "#87CEEB",
+        "glowColor": "#FF69B4"
+      }
+    },
+    "Haru": {
+      "id": "Haru",
+      "name": "Haru",
+      "modelPath": "/assets/live2d/characters/free/Haru/Haru.model3.json",
+      "textures": [],
+      "description": "Live2D Haru 角色",
+      "theme": {
+        "primaryColor": "#FFB6C1",
+        "secondaryColor": "#98FB98",
+        "glowColor": "#FFB6C1"
+      }
+    },
+    "Mao": {
+      "id": "Mao",
+      "name": "Mao",
+      "modelPath": "/assets/live2d/characters/free/Mao/Mao.model3.json",
+      "textures": [],
+      "description": "Live2D Mao 角色",
+      "theme": {
+        "primaryColor": "#DDA0DD",
+        "secondaryColor": "#F0E68C",
+        "glowColor": "#DDA0DD"
+      }
+    }
+  }
+}

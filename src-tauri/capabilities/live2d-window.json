@@ -1,0 +1,17 @@
+{
+  "identifier": "live2d-window",
+  "description": "Live2D pet window permissions",
+  "windows": ["live2d"],
+  "permissions": [
+    "core:window:allow-show",
+    "core:window:allow-hide",
+    "core:window:allow-close",
+    "core:window:allow-set-always-on-top",
+    "core:window:allow-set-position",
+    "core:window:allow-set-size",
+    "core:window:allow-is-visible",
+    "core:window:allow-outer-position",
+    "core:window:allow-outer-size",
+    "core:window:allow-is-always-on-top"
+  ]
+}

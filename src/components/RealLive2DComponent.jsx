@@ -3,7 +3,8 @@ import { useEffect, useRef, useState } from 'react';
 import { useLive2DCore } from './Live2D/useLive2DCore';
 import { useLive2DInit } from './Live2D/useLive2DInit';
 import { Live2DCanvas } from './Live2D/Live2DComponents';
-// import ContextMenu from './Live2D/ContextMenu'; // 暂时禁用
+import ContextMenu from './Live2D/ContextMenu';
+import { invoke } from '@tauri-apps/api/core';
 
 const RealLive2DComponentSimple = (props) => {
   const canvasRef = useRef(null);
@@ -20,18 +21,18 @@ const RealLive2DComponentSimple = (props) => {
   // 拖拽状态管理
   const [isDragging, setIsDragging] = useState(false);
 
-  // 右键菜单状态 - 暂时禁用
-  // const [contextMenu, setContextMenu] = useState({
-  //   visible: false,
-  //   x: 0,
-  //   y: 0
-  // });
+  // 右键菜单状态
+  const [contextMenu, setContextMenu] = useState({
+    visible: false,
+    x: 0,
+    y: 0
+  });
 
   // 透明度状态
-  // const [opacity, setOpacity] = useState(100);
+  const [opacity, setOpacity] = useState(100);
 
   // 置顶状态
-  // const [isAlwaysOnTop, setIsAlwaysOnTop] = useState(true);
+  const [isAlwaysOnTop, setIsAlwaysOnTop] = useState(true);
 
   // 监听来自Rust端的全局鼠标事件
   useEffect(() => {
@@ -100,105 +101,114 @@ const RealLive2DComponentSimple = (props) => {
     }
   }, [isDragging]);
 
-  // 右键菜单处理 - 暂时禁用
-  // const handleContextMenu = (e) => {
-  //   e.preventDefault();
-  //   setContextMenu({
-  //     visible: true,
-  //     x: e.clientX,
-  //     y: e.clientY
-  //   });
-  // };
+  // 右键菜单处理
+  const handleContextMenu = (e) => {
+    e.preventDefault();
+    setContextMenu({
+      visible: true,
+      x: e.clientX,
+      y: e.clientY
+    });
+  };
 
-  // // 关闭右键菜单
-  // const closeContextMenu = () => {
-  //   setContextMenu(prev => ({ ...prev, visible: false }));
-  // };
+  // 关闭右键菜单
+  const closeContextMenu = () => {
+    setContextMenu(prev => ({ ...prev, visible: false }));
+  };
 
-  // // 菜单项定义
-  // const menuItems = [
-  //   {
-  //     label: '切换模型',
-  //     action: () => {
-  //       // 这里可以实现模型切换逻辑
-  //       console.log('切换模型功能待实现');
-  //     }
-  //   },
-  //   {
-  //     type: 'separator'
-  //   },
-  //   {
-  //     label: '透明度',
-  //     type: 'slider',
-  //     min: 30,
-  //     max: 100,
-  //     value: opacity,
-  //     onChange: (value) => {
-  //       setOpacity(value);
-  //       if (window.__TAURI__?.invoke) {
-  //         window.__TAURI__.invoke('set_window_opacity', {
-  //           windowLabel: 'live2d',
-  //           opacity: value / 100.0
-  //         }).catch(err => {
-  //           console.error('设置透明度失败:', err);
-  //         });
-  //       }
-  //     }
-  //   },
-  //   {
-  //     label: isAlwaysOnTop ? '取消置顶' : '窗口置顶',
-  //     action: async () => {
-  //       if (window.__TAURI__?.invoke) {
-  //         try {
-  //           const newTopmost = await window.__TAURI__.invoke('toggle_always_on_top');
-  //           setIsAlwaysOnTop(newTopmost);
-  //         } catch (err) {
-  //           console.error('切换置顶状态失败:', err);
-  //         }
-  //       }
-  //     }
-  //   },
-  //   {
-  //     type: 'separator'
-  //   },
-  //   {
-  //     label: '重置位置',
-  //     action: () => {
-  //       if (window.__TAURI__?.invoke) {
-  //         window.__TAURI__.invoke('reset_window_position').catch(err => {
-  //           console.error('重置窗口位置失败:', err);
-  //         });
-  //       }
-  //     }
-  //   },
-  //   {
-  //     label: '关于',
-  //     action: async () => {
-  //       if (window.__TAURI__?.invoke) {
-  //         try {
-  //           const aboutText = await window.__TAURI__.invoke('show_about_dialog');
-  //           // 使用浏览器的alert显示关于信息
-  //           alert(aboutText);
-  //         } catch (err) {
-  //           console.error('显示关于对话框失败:', err);
-  //         }
-  //       }
-  //     }
-  //   },
-  //   {
-  //     type: 'separator'
-  //   },
-  //   {
-  //     label: '退出',
-  //     action: () => {
-  //       if (window.__TAURI__?.invoke) {
-  //         window.__TAURI__.invoke('exit_app').catch(err => {
-  //           console.error('退出应用失败:', err);
-  //         });
-  //       }
-  //     }
-  //   }
-  // ];
+  // 菜单项定义
+  const menuItems = [
+    {
+      label: '切换模型',
+      action: () => {
+        // 这里可以实现模型切换逻辑
+        console.log('切换模型功能待实现');
+      }
+    },
+    {
+      type: 'separator'
+    },
+    {
+      label: '透明度',
+      type: 'slider',
+      min: 30,
+      max: 100,
+      value: opacity,
+      onChange: async (value) => {
+        console.log('透明度滑块变化:', value);
+        setOpacity(value);
+        try {
+          console.log('调用Tauri设置透明度命令...');
+          await invoke('set_window_opacity', {
+            windowLabel: 'live2d',
+            opacity: value / 100.0
+          });
+          console.log('透明度设置成功');
+        } catch (err) {
+          console.error('设置透明度失败:', err);
+        }
+      }
+    },
+    {
+      label: isAlwaysOnTop ? '取消置顶' : '窗口置顶',
+      action: async () => {
+        console.log('置顶按钮被点击');
+        try {
+          console.log('调用Tauri置顶命令...');
+          const newTopmost = await invoke('toggle_always_on_top');
+          console.log('置顶状态切换成功:', newTopmost);
+          setIsAlwaysOnTop(newTopmost);
+        } catch (err) {
+          console.error('切换置顶状态失败:', err);
+        }
+      }
+    },
+    {
+      type: 'separator'
+    },
+    {
+      label: '重置位置',
+      action: async () => {
+        console.log('重置位置按钮被点击');
+        try {
+          console.log('调用Tauri重置位置命令...');
+          await invoke('reset_window_position');
+          console.log('位置重置成功');
+        } catch (err) {
+          console.error('重置窗口位置失败:', err);
+        }
+      }
+    },
+    {
+      label: '关于',
+      action: async () => {
+        try {
+          console.log('调用Tauri关于对话框命令...');
+          const aboutText = await invoke('show_about_dialog');
+          console.log('关于对话框显示成功');
+          // 使用浏览器的alert显示关于信息
+          alert(aboutText);
+        } catch (err) {
+          console.error('显示关于对话框失败:', err);
+        }
+      }
+    },
+    {
+      type: 'separator'
+    },
+    {
+      label: '退出',
+      action: async () => {
+        try {
+          console.log('调用Tauri退出应用命令...');
+          await invoke('exit_app');
+          console.log('应用退出成功');
+        } catch (err) {
+          console.error('退出应用失败:', err);
+        }
+      }
+    }
+  ];
 
   // 窗口拖拽处理 - 使用手动拖拽方法
   const handleMouseDown = (e) => {
@@ -250,17 +260,16 @@ const RealLive2DComponentSimple = (props) => {
         cursor: 'grab'
       }}
       onMouseDown={handleMouseDown}
-      // onContextMenu={handleContextMenu} // 暂时禁用
+      onContextMenu={handleContextMenu}
     >
       <Live2DCanvas canvasRef={canvasRef} />
-      {/* 暂时禁用右键菜单 */}
-      {/* <ContextMenu
+      <ContextMenu
         visible={contextMenu.visible}
         x={contextMenu.x}
         y={contextMenu.y}
         onClose={closeContextMenu}
         menuItems={menuItems}
-      /> */}
+      />
     </div>
   );
 };

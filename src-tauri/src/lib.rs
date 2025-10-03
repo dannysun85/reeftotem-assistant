@@ -230,6 +230,9 @@ async fn set_window_position(app: AppHandle, x: i32, y: i32) -> Result<(), Strin
 
 #[tauri::command]
 async fn exit_app() -> Result<(), String> {
+    println!("退出应用命令被调用");
+    // 给前端一点时间来显示成功消息
+    std::thread::sleep(std::time::Duration::from_millis(100));
     std::process::exit(0);
 }
 
@@ -325,11 +328,21 @@ async fn end_drag(_app: AppHandle) -> Result<(), String> {
 async fn set_window_opacity(app: AppHandle, window_label: String, opacity: f64) -> Result<(), String> {
     println!("设置窗口透明度: {} = {}", window_label, opacity);
 
-    if let Some(_window) = app.get_webview_window(&window_label) {
-        // Tauri 2.x 设置透明度的方法
-        // 注意：透明度设置在某些平台上可能有限制
-        // 这里我们暂时只是记录透明度设置，实际的透明度控制需要更复杂的实现
-        println!("窗口透明度设置完成: {} (实际效果将在后续版本实现)", opacity);
+    if let Some(window) = app.get_webview_window(&window_label) {
+        // Tauri 2.x 设置透明度的方法 - 通过JS注入实现
+        let opacity_js = format!("document.body.style.opacity = {}; document.documentElement.style.opacity = {}", opacity, opacity);
+        window.eval(&opacity_js).map_err(|e| e.to_string())?;
+
+        // 同时设置窗口的透明度（如果平台支持）
+        #[cfg(target_os = "macos")]
+        {
+            use tauri::Manager;
+            if let Err(e) = window.set_alpha(opacity) {
+                println!("设置窗口alpha失败: {}", e);
+            }
+        }
+
+        println!("窗口透明度设置完成: {}", opacity);
         Ok(())
     } else {
         Err(format!("找不到窗口: {}", window_label))
@@ -400,7 +413,7 @@ async fn reset_window_position(app: AppHandle) -> Result<(), String> {
 async fn show_about_dialog() -> Result<String, String> {
     println!("显示关于对话框");
 
-    let about_text = "ReefTotem Assistant v0.1.1\n\n一个基于Live2D的智能数字人助手\n\n技术栈：\n• Tauri 2.x\n• React + TypeScript\n• Live2D Cubism SDK\n\n© 2025 开发团队".to_string();
+    let about_text = "🐠 ReefTotem Assistant v0.1.1\n\n🎭 一个基于Live2D的智能数字人助手\n\n✨ 功能特性：\n• Live2D 实时渲染\n• 智能鼠标跟踪\n• 窗口透明度调节\n• 多窗口支持\n• 右键交互菜单\n\n🛠️ 技术栈：\n• Tauri 2.8.5\n• React 19 + TypeScript\n• Live2D Cubism SDK\n• Vite 7.x\n\n📝 开发进度：\n✅ v0.1.1 - 基础Live2D功能\n✅ v0.1.2 - 右键菜单系统\n🚀 Phase 2 - AI语音对话 (即将推出)\n\n© 2025 ReefTotem Team".to_string();
 
     Ok(about_text)
 }

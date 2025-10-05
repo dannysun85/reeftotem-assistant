@@ -67,32 +67,65 @@ export class LAppDelegate {
    * 実行処理。
    */
   public run(): void {
-    console.log('LAppDelegate.run: 开始渲染循环');
-
     // メインループ
     const loop = (): void => {
-      console.log('LAppDelegate.run: 执行渲染循环帧');
-
       // インスタンスの有無の確認
       if (s_instance == null) {
-        console.log('LAppDelegate.run: 实例为null，停止循环');
         return;
       }
 
-      // 時間更新
-      LAppPal.updateTime();
-      console.log('LAppDelegate.run: 更新时间，开始更新subdelegates');
+      const currentTime = performance.now();
+      const deltaTime = currentTime - this._lastFrameTime;
 
-      for (let i = 0; i < this._subdelegates.getSize(); i++) {
-        console.log(`LAppDelegate.run: 调用subdelegate ${i} 的 update方法`);
-        this._subdelegates.at(i).update();
+      // 检查是否应该更新帧
+      let shouldUpdate = true;
+
+      if (!this._isIdle) {
+        // 活动状态：检查是否进入空闲
+        if (currentTime - this._idleCheckTime > this._idleTimeout) {
+          this._isIdle = true;
+          this._targetFPS = 30; // 空闲时降低到30FPS
+          this._frameInterval = 1000 / this._targetFPS;
+        }
+      } else {
+        // 空闲状态：检查帧率控制
+        if (deltaTime < this._frameInterval) {
+          shouldUpdate = false;
+        }
+      }
+
+      if (shouldUpdate) {
+        // 時間更新
+        LAppPal.updateTime();
+
+        for (let i = 0; i < this._subdelegates.getSize(); i++) {
+          this._subdelegates.at(i).update();
+        }
+
+        this._lastFrameTime = currentTime;
       }
 
       // ループのために再帰呼び出し
       requestAnimationFrame(loop);
     };
-    console.log('LAppDelegate.run: 启动渲染循环');
+
+    // 初始化时间戳
+    this._lastFrameTime = performance.now();
+    this._idleCheckTime = this._lastFrameTime;
+
     loop();
+  }
+
+  /**
+   * 活动交互事件 - 重置空闲状态
+   */
+  public notifyActivity(): void {
+    this._idleCheckTime = performance.now();
+    if (this._isIdle) {
+      this._isIdle = false;
+      this._targetFPS = 60; // 恢复到60FPS
+      this._frameInterval = 1000 / this._targetFPS;
+    }
   }
 
   /**
@@ -161,25 +194,19 @@ export class LAppDelegate {
    * Cubism SDKの初期化
    */
   private initializeCubism(): void {
-    console.log('LAppDelegate.initializeCubism: 开始初始化Cubism框架');
     LAppPal.updateTime();
 
     // setup cubism
-    console.log('LAppDelegate.initializeCubism: 设置Cubism选项');
     this._cubismOption.logFunction = LAppPal.printMessage;
     this._cubismOption.loggingLevel = LAppDefine.CubismLoggingLevel;
 
     try {
-      console.log('LAppDelegate.initializeCubism: 启动CubismFramework');
       CubismFramework.startUp(this._cubismOption);
-      console.log('LAppDelegate.initializeCubism: CubismFramework启动成功');
 
       // initialize cubism
-      console.log('LAppDelegate.initializeCubism: 初始化CubismFramework');
       CubismFramework.initialize();
-      console.log('LAppDelegate.initializeCubism: CubismFramework初始化完成');
     } catch (error) {
-      console.error('LAppDelegate.initializeCubism: CubismFramework初始化失败:', error);
+      console.error('CubismFramework初始化失败:', error);
       throw error;
     }
   }
@@ -212,8 +239,7 @@ export class LAppDelegate {
       if (!canvas) {
         throw new Error('Canvas element with id "live2dCanvas" not found. Make sure the React component has rendered the canvas.');
       }
-      console.log('找到canvas元素:', canvas);
-      this._canvases.pushBack(canvas);
+            this._canvases.pushBack(canvas);
       // canvas.style.width = `${width}vw`;
       // canvas.style.height = `${height}vh`;
 
@@ -268,9 +294,22 @@ export class LAppDelegate {
    * Subdelegate
    */
   private _subdelegates: csmVector<LAppSubdelegate>;
+
+  /**
+   * 帧率控制变量
+   */
+  private _lastFrameTime: number = 0;
+  private _targetFPS: number = 60;
+  private _frameInterval: number = 1000 / 60; // 毫秒
+  private _isIdle: boolean = false;
+  private _idleCheckTime: number = 0;
+  private _idleTimeout: number = 5000; // 5秒无交互后进入空闲状态
 }
 
 function onPointerBegan(e: PointerEvent): void {
+  // 通知活动状态，重置空闲检测
+  LAppDelegate.getInstance().notifyActivity();
+
   for (
     let ite = LAppDelegate.getInstance().getSubdelegate().begin();
     ite.notEqual(LAppDelegate.getInstance().getSubdelegate().end());
@@ -281,6 +320,9 @@ function onPointerBegan(e: PointerEvent): void {
 }
 
 function onPointerMoved(e: PointerEvent): void {
+  // 通知活动状态，重置空闲检测
+  LAppDelegate.getInstance().notifyActivity();
+
   for (
     let ite = LAppDelegate.getInstance().getSubdelegate().begin();
     ite.notEqual(LAppDelegate.getInstance().getSubdelegate().end());
@@ -291,6 +333,9 @@ function onPointerMoved(e: PointerEvent): void {
 }
 
 function onPointerEnded(e: PointerEvent): void {
+  // 通知活动状态，重置空闲检测
+  LAppDelegate.getInstance().notifyActivity();
+
   for (
     let ite = LAppDelegate.getInstance().getSubdelegate().begin();
     ite.notEqual(LAppDelegate.getInstance().getSubdelegate().end());

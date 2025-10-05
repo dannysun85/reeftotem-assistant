@@ -70,8 +70,9 @@ async fn show_live2d_window_with_animation(app: AppHandle) -> Result<(), String>
             let _ = main_window.emit("show-pet", ());
         }
 
-        // 更新菜单状态
-        if let Err(e) = update_menu_state_from_handle(&app_clone, true, "cat") {
+        // 使用默认的模型名称，因为无法在这里访问menu_state
+        let current_persona = "haru".to_string();
+        if let Err(e) = update_menu_state_from_handle(&app_clone, true, &current_persona) {
             eprintln!("更新菜单状态失败: {}", e);
         }
     });
@@ -112,8 +113,9 @@ async fn trigger_hide_animation(app: AppHandle) -> Result<(), String> {
                 let _ = window.hide();
             }
 
-            // 更新菜单状态
-            if let Err(e) = update_menu_state_from_handle(&app_clone, false, "cat") {
+            // 使用默认的模型名称，因为无法在这里访问menu_state
+            let current_persona = "haru".to_string();
+            if let Err(e) = update_menu_state_from_handle(&app_clone, false, &current_persona) {
                 eprintln!("更新菜单状态失败: {}", e);
             }
         });
@@ -230,7 +232,6 @@ async fn set_window_position(app: AppHandle, x: i32, y: i32) -> Result<(), Strin
 
 #[tauri::command]
 async fn exit_app() -> Result<(), String> {
-    println!("退出应用命令被调用");
     // 给前端一点时间来显示成功消息
     std::thread::sleep(std::time::Duration::from_millis(100));
     std::process::exit(0);
@@ -289,60 +290,28 @@ async fn start_mouse_tracking(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-// 开始手动拖拽 - 记录初始位置
+// 开始窗口拖拽 - 使用Tauri 2.x原生拖拽
 #[tauri::command]
 async fn start_manual_drag(app: AppHandle) -> Result<(), String> {
-    println!("开始手动拖拽");
     if let Some(window) = app.get_webview_window("live2d") {
-        if let Ok(position) = window.outer_position() {
-            let _ = window.emit("drag_start", serde_json::json!({
-                "x": position.x,
-                "y": position.y
-            }));
-            println!("发送拖拽开始事件: x={}, y={}", position.x, position.y);
-        }
+        // Tauri 2.x 使用 start_dragging() 方法启用系统级拖拽
+        window.start_dragging().map_err(|e| {
+            format!("启动拖拽失败: {}", e)
+        })?;
     }
-    Ok(())
-}
-
-// 处理拖拽移动
-#[tauri::command]
-async fn handle_drag_move(app: AppHandle, x: i32, y: i32) -> Result<(), String> {
-    if let Some(window) = app.get_webview_window("live2d") {
-        window.set_position(tauri::Position::Physical(tauri::PhysicalPosition { x, y }))
-            .map_err(|e| e.to_string())?;
-    }
-    Ok(())
-}
-
-// 结束拖拽
-#[tauri::command]
-async fn end_drag(_app: AppHandle) -> Result<(), String> {
-    println!("结束拖拽");
-    // 这里可以添加拖拽结束的逻辑
     Ok(())
 }
 
 // 设置窗口透明度
 #[tauri::command]
 async fn set_window_opacity(app: AppHandle, window_label: String, opacity: f64) -> Result<(), String> {
-    println!("设置窗口透明度: {} = {}", window_label, opacity);
-
     if let Some(window) = app.get_webview_window(&window_label) {
         // Tauri 2.x 设置透明度的方法 - 通过JS注入实现
         let opacity_js = format!("document.body.style.opacity = {}; document.documentElement.style.opacity = {}", opacity, opacity);
         window.eval(&opacity_js).map_err(|e| e.to_string())?;
 
-        // 同时设置窗口的透明度（如果平台支持）
-        #[cfg(target_os = "macos")]
-        {
-            use tauri::Manager;
-            if let Err(e) = window.set_alpha(opacity) {
-                println!("设置窗口alpha失败: {}", e);
-            }
-        }
+        // 透明度已通过JavaScript设置完成
 
-        println!("窗口透明度设置完成: {}", opacity);
         Ok(())
     } else {
         Err(format!("找不到窗口: {}", window_label))
@@ -352,8 +321,6 @@ async fn set_window_opacity(app: AppHandle, window_label: String, opacity: f64) 
 // 切换窗口置顶状态
 #[tauri::command]
 async fn toggle_always_on_top(app: AppHandle) -> Result<bool, String> {
-    println!("切换窗口置顶状态");
-
     if let Some(window) = app.get_webview_window("live2d") {
         // 获取当前置顶状态
         let current_topmost = window.is_always_on_top().map_err(|e| e.to_string())?;
@@ -362,7 +329,6 @@ async fn toggle_always_on_top(app: AppHandle) -> Result<bool, String> {
         let new_topmost = !current_topmost;
         window.set_always_on_top(new_topmost).map_err(|e| e.to_string())?;
 
-        println!("窗口置顶状态切换: {} -> {}", current_topmost, new_topmost);
         Ok(new_topmost)
     } else {
         Err("找不到Live2D窗口".to_string())
@@ -372,8 +338,6 @@ async fn toggle_always_on_top(app: AppHandle) -> Result<bool, String> {
 // 重置窗口位置到右下角
 #[tauri::command]
 async fn reset_window_position(app: AppHandle) -> Result<(), String> {
-    println!("重置窗口位置到右下角");
-
     if let Some(window) = app.get_webview_window("live2d") {
         // 获取屏幕尺寸
         if let Some(monitor) = window.current_monitor().map_err(|e| e.to_string())? {
@@ -395,7 +359,6 @@ async fn reset_window_position(app: AppHandle) -> Result<(), String> {
                     y: final_y
                 })).map_err(|e| e.to_string())?;
 
-                println!("窗口位置已重置到: x={}, y={}", final_x, final_y);
                 Ok(())
             } else {
                 Err("无法获取窗口尺寸".to_string())
@@ -411,9 +374,7 @@ async fn reset_window_position(app: AppHandle) -> Result<(), String> {
 // 显示关于对话框
 #[tauri::command]
 async fn show_about_dialog() -> Result<String, String> {
-    println!("显示关于对话框");
-
-    let about_text = "🐠 ReefTotem Assistant v0.1.1\n\n🎭 一个基于Live2D的智能数字人助手\n\n✨ 功能特性：\n• Live2D 实时渲染\n• 智能鼠标跟踪\n• 窗口透明度调节\n• 多窗口支持\n• 右键交互菜单\n\n🛠️ 技术栈：\n• Tauri 2.8.5\n• React 19 + TypeScript\n• Live2D Cubism SDK\n• Vite 7.x\n\n📝 开发进度：\n✅ v0.1.1 - 基础Live2D功能\n✅ v0.1.2 - 右键菜单系统\n🚀 Phase 2 - AI语音对话 (即将推出)\n\n© 2025 ReefTotem Team".to_string();
+    let about_text = "🐠 ReefTotem Assistant v0.1.2\n\n🎭 一个基于Live2D的智能数字人助手\n\n✨ 功能特性：\n• Live2D 实时渲染\n• 智能鼠标跟踪\n• 窗口透明度调节\n• 多窗口支持\n• 右键交互菜单\n\n🛠️ 技术栈：\n• Tauri 2.8.5\n• React 19 + TypeScript\n• Live2D Cubism SDK\n• Vite 7.x\n\n📝 开发进度：\n✅ v0.1.1 - 基础Live2D功能\n✅ v0.1.2 - 右键菜单系统\n✅ v0.1.3 - 性能优化 (当前)\n🚀 Phase 2 - AI语音对话 (即将推出)\n\n© 2025 ReefTotem Team".to_string();
 
     Ok(about_text)
 }
@@ -421,25 +382,12 @@ async fn show_about_dialog() -> Result<String, String> {
 // 手动窗口拖拽 - 处理透明窗口拖拽问题
 #[tauri::command]
 async fn start_window_drag(app: AppHandle) -> Result<(), String> {
-    println!("开始窗口拖拽命令被调用");
     if let Some(window) = app.get_webview_window("live2d") {
-        println!("找到Live2D窗口");
-
         // 首先尝试Tauri原生的拖拽方法
-        match window.start_dragging() {
-            Ok(()) => {
-                println!("窗口拖拽启动成功");
-                return Ok(());
-            },
-            Err(e) => {
-                println!("Tauri原生拖拽失败: {}, 尝试手动实现", e);
-                // 如果原生方法失败，返回成功但让前端处理
-                return Ok(());
-            }
-        }
+        let _ = window.start_dragging();
+        Ok(())
     } else {
-        println!("无法找到Live2D窗口");
-        return Err("无法找到Live2D窗口".to_string());
+        Err("无法找到Live2D窗口".to_string())
     }
 }
 
@@ -511,8 +459,6 @@ pub fn run() {
             set_window_position,
             start_mouse_tracking,
             start_manual_drag,
-            handle_drag_move,
-            end_drag,
             start_window_drag,
             set_window_opacity,
             toggle_always_on_top,

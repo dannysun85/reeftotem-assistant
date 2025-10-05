@@ -66,7 +66,6 @@ const ContextMenu = ({
 
   const handleMenuItemClick = (item) => {
     if (item.type === 'slider') return;
-    console.log('菜单项被点击:', item.label);
     item.action();
     onClose();
   };
@@ -117,11 +116,9 @@ const ContextMenu = ({
             max: item.max || 100,
             value: item.value || 50,
             onChange: (e) => {
-              console.log('滑块onChange事件触发:', parseInt(e.target.value));
               handleSliderChange(item, parseInt(e.target.value));
             },
             onInput: (e) => {
-              console.log('滑块onInput事件触发:', parseInt(e.target.value));
               handleSliderChange(item, parseInt(e.target.value));
             },
             className: 'context-menu-slider',

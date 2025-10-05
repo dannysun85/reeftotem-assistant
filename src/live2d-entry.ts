@@ -60,7 +60,7 @@ async function initializeLive2DApp() {
             reactRoot.render(React.createElement(Live2DWindow));
         }
     } catch (error) {
-        // 静默处理错误
+        console.error("Live2D应用初始化失败:", error);
     }
 }
 

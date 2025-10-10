@@ -4,6 +4,10 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Live2D Pet</title>
+    
+    <!-- 🔑 关键：Tauri v2 使用内置的 ipc.js 来初始化 API -->
+    <!-- Tauri 会自动注入这个脚本，但对于独立窗口我们需要确保它存在 -->
+    
     <script type="module" src="/src/live2d-entry.ts"></script>
     <style>
       /* 完全透明的背景 */

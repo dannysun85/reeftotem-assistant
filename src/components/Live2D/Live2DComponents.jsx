@@ -5,12 +5,12 @@ export const Live2DCanvas = ({ canvasRef }) => (
     ref={canvasRef}
     id="live2dCanvas"
     style={{
-      width: '100%',
-      height: '100%',
+      width: '800px',
+      height: '1000px',
       display: 'block',
       backgroundColor: 'transparent'
     }}
-    width={400}
-    height={500}
+    width={800}
+    height={1000}
   />
 );

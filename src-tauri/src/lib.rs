@@ -1,79 +1,397 @@
-use tauri::{menu::{Menu, MenuItem, PredefinedMenuItem, Submenu}, tray::TrayIconBuilder, Manager, Emitter, AppHandle};
-use std::sync::{Arc, Mutex};
-use std::thread;
-use std::time::Duration;
+// Tauri v2 模块化主文件
+// 按照官方文档最佳实践组织代码
 
-// Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
+use std::fs;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+use tauri::{
+    image::Image,
+    menu::{MenuBuilder, MenuItem, PredefinedMenuItem, Submenu},
+    tray::{TrayIcon, TrayIconBuilder},
+    AppHandle, Manager,
+};
+
+// 应用状态，用于保持托盘图标存活
+pub struct AppState {
+    pub tray_icon: Arc<Mutex<Option<TrayIcon>>>,
+}
+
+// ========== 模块化组织 ==========
+
+/// 窗口管理模块
+mod window_manager {
+    use super::*;
+
+    /// 显示Live2D窗口
+    pub async fn show_live2d_window<R: tauri::Runtime>(app: AppHandle<R>) -> Result<(), String> {
+        if let Some(webview_window) = app.get_webview_window("live2d") {
+            webview_window.show().map_err(|e| e.to_string())?;
+            webview_window.set_focus().map_err(|e| e.to_string())?;
+            println!("✅ Live2D窗口已显示");
+        }
+        Ok(())
+    }
+
+    /// 隐藏Live2D窗口
+    pub async fn hide_live2d_window<R: tauri::Runtime>(app: AppHandle<R>) -> Result<(), String> {
+        if let Some(webview_window) = app.get_webview_window("live2d") {
+            webview_window.hide().map_err(|e| e.to_string())?;
+            println!("✅ Live2D窗口已隐藏");
+        }
+        Ok(())
+    }
+
+    /// 定位Live2D窗口 - 修复版本：先计算最终位置再显示
+    pub async fn position_live2d_window<R: tauri::Runtime>(
+        app: AppHandle<R>,
+    ) -> Result<(), String> {
+        println!("🎯 开始定位Live2D窗口...");
+
+        if let Some(window) = app.get_webview_window("live2d") {
+            println!("✅ 找到Live2D窗口");
+
+            // 🚫 隐藏窗口，避免显示中间位置
+            window.hide().map_err(|e| e.to_string())?;
+            println!("🙈 窗口已隐藏，准备计算最终位置");
+
+            // 等待窗口完全准备好
+            std::thread::sleep(Duration::from_millis(300));
+
+            // 📏 获取屏幕信息
+            let monitor = window
+                .current_monitor()
+                .map_err(|e| e.to_string())?
+                .ok_or("无法获取显示器信息")?;
+            let screen_size = monitor.size();
+
+            // 📐 设置更大的窗口尺寸 (800x1000 - 扩大一倍)
+            let target_width = 800;
+            let target_height = 1000;
+
+            println!("📺 屏幕尺寸: {}x{}", screen_size.width, screen_size.height);
+            println!("📐 目标窗口尺寸: {}x{}", target_width, target_height);
+
+            // 🔧 先设置窗口尺寸
+            window
+                .set_size(tauri::Size::Physical(tauri::PhysicalSize {
+                    width: target_width,
+                    height: target_height,
+                }))
+                .map_err(|e| e.to_string())?;
+
+            // 等待尺寸设置生效
+            std::thread::sleep(Duration::from_millis(200));
+
+            // 📍 计算最终右下角位置
+            let x = screen_size.width - target_width - 50;
+            let y = screen_size.height - target_height - 50;
+
+            println!("📍 计算最终位置: x={}, y={}", x, y);
+
+            // 🎯 直接设置到最终位置
+            window
+                .set_position(tauri::Position::Physical(tauri::PhysicalPosition {
+                    x: x as i32,
+                    y: y as i32,
+                }))
+                .map_err(|e| e.to_string())?;
+
+            // 等待位置设置生效
+            std::thread::sleep(Duration::from_millis(200));
+
+            // ⚙️ 设置窗口属性
+            window.set_always_on_top(true).map_err(|e| e.to_string())?;
+            window.set_resizable(false).map_err(|e| e.to_string())?;
+            window.set_decorations(false).map_err(|e| e.to_string())?;
+
+            // ✅ 最后显示窗口在正确位置
+            window.show().map_err(|e| e.to_string())?;
+            window.set_focus().map_err(|e| e.to_string())?;
+
+            println!(
+                "✅ Live2D窗口已显示在最终位置: x={}, y={} (尺寸: {}x{})",
+                x, y, target_width, target_height
+            );
+        } else {
+            return Err("❌ 无法找到Live2D窗口".to_string());
+        }
+        Ok(())
+    }
+}
+
+/// 事件发送模块
+mod event_emitter {
+    use super::*;
+    use tauri::Emitter;
+
+    /// 发送Live2D模型切换事件
+    pub async fn emit_model_switch<R: tauri::Runtime>(
+        app: AppHandle<R>,
+        model_name: &str,
+    ) -> Result<(), String> {
+        println!("🔥 开始发送模型切换事件: {}", model_name);
+
+        if let Some(webview_window) = app.get_webview_window("live2d") {
+            println!("✅ 找到live2d窗口，准备发送事件");
+
+            let payload = serde_json::json!({
+                "model_name": model_name,
+                "timestamp": chrono::Utc::now().to_rfc3339()
+            });
+
+            println!("📦 事件payload: {}", payload);
+
+            // 发送到switch_live2d_model事件
+            webview_window
+                .emit("switch_live2d_model", &payload)
+                .map_err(|e| format!("事件发送失败: {}", e))?;
+
+            println!("✅ switch_live2d_model事件发送成功");
+
+            // 同时发送到switch_persona事件以保持兼容性
+            webview_window
+                .emit(
+                    "switch_persona",
+                    &serde_json::json!({
+                        "persona": model_name,
+                        "timestamp": chrono::Utc::now().to_rfc3339()
+                    }),
+                )
+                .map_err(|e| format!("兼容事件发送失败: {}", e))?;
+
+            println!("✅ switch_persona兼容事件发送成功");
+        } else {
+            return Err("找不到Live2D窗口".to_string());
+        }
+        Ok(())
+    }
+
+    /// 发送显示动画事件
+    pub async fn emit_show_animation<R: tauri::Runtime>(app: AppHandle<R>) -> Result<(), String> {
+        if let Some(webview_window) = app.get_webview_window("live2d") {
+            webview_window
+                .emit("show_animation", ())
+                .map_err(|e| format!("显示动画事件发送失败: {}", e))?;
+        }
+        Ok(())
+    }
+
+    /// 发送隐藏动画事件
+    pub async fn emit_hide_animation<R: tauri::Runtime>(app: AppHandle<R>) -> Result<(), String> {
+        if let Some(webview_window) = app.get_webview_window("live2d") {
+            webview_window
+                .emit("hide_animation", ())
+                .map_err(|e| format!("隐藏动画事件发送失败: {}", e))?;
+        }
+        Ok(())
+    }
+}
+
+/// 窗口状态管理模块
+mod window_state {
+
+    #[derive(Clone)]
+    pub struct WindowState {
+        pub is_pet_visible: bool,
+        pub current_persona: String,
+    }
+
+    impl WindowState {
+        pub fn new() -> Self {
+            Self {
+                is_pet_visible: false,
+                current_persona: "HaruGreeter".to_string(),
+            }
+        }
+
+        pub fn set_pet_visibility(&mut self, visible: bool) {
+            self.is_pet_visible = visible;
+        }
+
+        pub fn set_current_persona(&mut self, persona: String) {
+            self.current_persona = persona;
+        }
+    }
+}
+
+/// 托盘菜单管理模块
+mod tray_manager {
+    use super::*;
+
+    /// Live2D角色列表
+    pub const LIVE2D_PERSONAS: &[(&str, &str, &str)] = &[
+        ("HaruGreeter", "Haru Greeter", "👋"),
+        ("Haru", "Haru", "🌸"),
+        ("Kei", "Kei", "💼"),
+        ("Chitose", "Chitose", "🌸"),
+        ("Epsilon", "Epsilon", "🚀"),
+        ("Hibiki", "Hibiki", "🎸"),
+        ("Hiyori", "Hiyori", "🌺"),
+        ("Izumi", "Izumi", "💎"),
+        ("Mao", "Mao", "🔥"),
+        ("Rice", "Rice", "🍚"),
+        ("Shizuku", "Shizuku", "🍃"),
+        ("Tsumiki", "Tsumiki", "🎀"),
+    ];
+
+    /// 重新构建托盘菜单以更新选中状态
+    pub fn rebuild_tray_menu<R: tauri::Runtime>(
+        app: &tauri::AppHandle<R>,
+        menu_state: Arc<Mutex<window_state::WindowState>>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        println!("🔄 重建托盘菜单...");
+
+        // 创建新菜单
+        let new_menu = create_tray_menu(app, menu_state.clone())?;
+
+        // 更新托盘图标菜单
+        if let Some(tray) = app.tray_by_id("main") {
+            tray.set_menu(Some(new_menu))?;
+            println!("✅ 托盘菜单更新成功");
+        } else {
+            println!("⚠️ 找不到托盘图标");
+        }
+
+        Ok(())
+    }
+
+    /// 创建托盘菜单
+    pub fn create_tray_menu<R: tauri::Runtime>(
+        app: &tauri::AppHandle<R>,
+        menu_state: Arc<Mutex<window_state::WindowState>>,
+    ) -> Result<tauri::menu::Menu<R>, Box<dyn std::error::Error>> {
+        println!("🏗️ 开始创建托盘菜单...");
+
+        // 获取当前状态
+        let current_persona = {
+            if let Ok(state) = menu_state.lock() {
+                state.current_persona.clone()
+            } else {
+                "HaruGreeter".to_string()
+            }
+        };
+
+        println!("📋 当前数字人: {}", current_persona);
+
+        // 基础菜单项
+        let show_live2d = MenuItem::with_id(app, "show_pet", "显示宠物", true, None::<&str>)?;
+        let hide_live2d = MenuItem::with_id(app, "hide_pet", "隐藏宠物", true, None::<&str>)?;
+
+        // 数字人子菜单
+        let persona_submenu = Submenu::with_id(app, "persona_submenu", "切换数字人", true)?;
+
+        // 添加Live2D角色
+        for (id, name, emoji) in LIVE2D_PERSONAS {
+            let display_name = if current_persona == *id {
+                format!("{} {} ✓", emoji, name)
+            } else {
+                format!("{} {}", emoji, name)
+            };
+
+            let persona_item = MenuItem::with_id(
+                app,
+                id, // 直接使用角色名作为ID
+                display_name,
+                true,
+                None::<&str>,
+            )?;
+
+            persona_submenu.append(&persona_item)?;
+        }
+
+        let quit_item = PredefinedMenuItem::quit(app, Some("退出应用"))?;
+
+        let menu = MenuBuilder::new(app)
+            .item(&show_live2d)
+            .item(&hide_live2d)
+            .separator()
+            .item(&persona_submenu)
+            .separator()
+            .item(&quit_item)
+            .build()?;
+
+        println!("✅ 托盘菜单创建完成");
+        Ok(menu)
+    }
+
+    /// 处理托盘菜单事件（主要用于Live2D角色切换）
+    pub fn handle_tray_event<R: tauri::Runtime>(
+        app: &tauri::AppHandle<R>,
+        event_id: &tauri::menu::MenuId,
+        menu_state: Arc<Mutex<window_state::WindowState>>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        println!("🔔 托盘事件触发: {:?}", event_id);
+
+        let event_str: &str = event_id.as_ref();
+
+        // 检查是否为角色切换事件（直接匹配角色名称）
+        let is_persona_event = LIVE2D_PERSONAS.iter().any(|(id, _, _)| *id == event_str);
+
+        if is_persona_event {
+            println!("🔄 触发模型切换: {}", event_str);
+
+            if let Err(e) = tauri::async_runtime::block_on(async {
+                event_emitter::emit_model_switch(app.clone(), event_str).await
+            }) {
+                eprintln!("❌ 切换到{}失败: {}", event_str, e);
+            } else {
+                println!("✅ 切换到{}成功", event_str);
+                if let Ok(mut state) = menu_state.lock() {
+                    state.set_current_persona(event_str.to_string());
+                    println!("✅ 状态已更新，当前选中: {}", event_str);
+                }
+
+                // 释放锁后再重建托盘菜单（避免死锁）
+                if let Err(e) = rebuild_tray_menu::<R>(app, menu_state.clone()) {
+                    eprintln!("⚠️ 重建托盘菜单失败: {}", e);
+                } else {
+                    println!("✅ 托盘菜单已更新选中标记");
+                }
+            }
+        } else {
+            println!("⚠️ 未知事件: {:?}", event_id);
+        }
+
+        Ok(())
+    }
+}
+
+// ========== Tauri命令定义 ==========
+
 #[tauri::command]
 fn greet(name: &str) -> String {
     format!("Hello, {}! You've been greeted from Rust!", name)
 }
 
-// 添加显示动画命令
 #[tauri::command]
 async fn trigger_show_animation(app: AppHandle) -> Result<(), String> {
-    // 发送事件给Live2D窗口触发显示动画
-    if let Some(webview_window) = app.get_webview_window("live2d") {
-        webview_window.emit("show_animation", ()).map_err(|e: tauri::Error| e.to_string())?;
-    }
-    Ok(())
+    event_emitter::emit_show_animation(app).await
 }
 
 #[tauri::command]
 async fn switch_persona(app: AppHandle, persona: String) -> Result<(), String> {
-    // 发送事件给Live2D窗口切换数字人
-    if let Some(webview_window) = app.get_webview_window("live2d") {
-        webview_window.emit("switch_persona", serde_json::json!({ "persona": persona }))
-            .map_err(|e: tauri::Error| e.to_string())?;
-    }
-    Ok(())
+    // 使用新的模块化事件发送
+    event_emitter::emit_model_switch(app, &persona).await
 }
 
 #[tauri::command]
 async fn show_live2d_window(app: AppHandle) -> Result<(), String> {
-    if let Some(webview_window) = app.get_webview_window("live2d") {
-        webview_window.show().map_err(|e| e.to_string())?;
-        webview_window.set_focus().map_err(|e| e.to_string())?;
-    }
-    Ok(())
+    window_manager::show_live2d_window(app).await
 }
 
 #[tauri::command]
 async fn show_live2d_window_with_animation(app: AppHandle) -> Result<(), String> {
-    // 先触发显示动画
     if let Err(e) = trigger_show_animation(app.clone()).await {
         eprintln!("触发显示动画失败: {}", e);
     }
 
-    // 延迟显示窗口（给动画时间执行）
     let app_clone = app.clone();
     std::thread::spawn(move || {
-        std::thread::sleep(std::time::Duration::from_millis(500));
-        if let Some(window) = app_clone.get_webview_window("live2d") {
-            let _ = window.show();
-            let _ = window.set_focus();
-
-            // 延迟定位到右下角
-            let app_clone2 = app_clone.clone();
-            std::thread::spawn(move || {
-                std::thread::sleep(std::time::Duration::from_millis(100));
-                if let Err(e) = tauri::async_runtime::block_on(async {
-                    position_live2d_window(app_clone2).await
-                }) {
-                    eprintln!("定位Live2D窗口失败: {}", e);
-                }
-            });
-        }
-
-        // 向主窗口发送显示事件
-        if let Some(main_window) = app_clone.get_webview_window("main") {
-            let _ = main_window.emit("show-pet", ());
-        }
-
-        // 使用默认的模型名称，因为无法在这里访问menu_state
-        let current_persona = "haru".to_string();
-        if let Err(e) = update_menu_state_from_handle(&app_clone, true, &current_persona) {
-            eprintln!("更新菜单状态失败: {}", e);
+        std::thread::sleep(Duration::from_millis(500));
+        if let Err(e) = tauri::async_runtime::block_on(async {
+            window_manager::show_live2d_window(app_clone).await
+        }) {
+            eprintln!("显示窗口失败: {}", e);
         }
     });
 
@@ -82,18 +400,18 @@ async fn show_live2d_window_with_animation(app: AppHandle) -> Result<(), String>
 
 #[tauri::command]
 async fn hide_live2d_window(app: AppHandle) -> Result<(), String> {
-    if let Some(webview_window) = app.get_webview_window("live2d") {
-        webview_window.hide().map_err(|e| e.to_string())?;
-    }
-    Ok(())
+    window_manager::hide_live2d_window(app).await
 }
 
+#[tauri::command]
+async fn switch_live2d_model(app: AppHandle, model_name: String) -> Result<(), String> {
+    event_emitter::emit_model_switch(app, &model_name).await
+}
 
 #[tauri::command]
 async fn is_live2d_visible(app: AppHandle) -> Result<bool, String> {
-    if let Some(webview_window) = app.get_webview_window("live2d") {
-        let is_visible = webview_window.is_visible().map_err(|e| e.to_string())?;
-        Ok(is_visible)
+    if let Some(window) = app.get_webview_window("live2d") {
+        window.is_visible().map_err(|e| e.to_string())
     } else {
         Ok(false)
     }
@@ -101,344 +419,141 @@ async fn is_live2d_visible(app: AppHandle) -> Result<bool, String> {
 
 #[tauri::command]
 async fn trigger_hide_animation(app: AppHandle) -> Result<(), String> {
-    // 发送事件给Live2D窗口触发隐藏动画
-    if let Some(webview_window) = app.get_webview_window("live2d") {
-        webview_window.emit("hide_animation", ()).map_err(|e: tauri::Error| e.to_string())?;
-
-        // 延迟后隐藏窗口（给动画时间执行）
-        let app_clone = app.clone();
-        std::thread::spawn(move || {
-            std::thread::sleep(std::time::Duration::from_millis(1000));
-            if let Some(window) = app_clone.get_webview_window("live2d") {
-                let _ = window.hide();
-            }
-
-            // 使用默认的模型名称，因为无法在这里访问menu_state
-            let current_persona = "haru".to_string();
-            if let Err(e) = update_menu_state_from_handle(&app_clone, false, &current_persona) {
-                eprintln!("更新菜单状态失败: {}", e);
-            }
-        });
-    }
-    Ok(())
+    event_emitter::emit_hide_animation(app).await
 }
 
 #[tauri::command]
 async fn position_live2d_window(app: AppHandle) -> Result<(), String> {
-    println!("开始定位Live2D窗口...");
-
-    if let Some(window) = app.get_webview_window("live2d") {
-        println!("找到Live2D窗口");
-
-        // 等待窗口完全准备好
-        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-
-        // 确保窗口可见
-        window.show().map_err(|e| e.to_string())?;
-        println!("窗口已设置为可见");
-
-        // 获取屏幕尺寸
-        if let Ok(monitor) = window.current_monitor() {
-            if let Some(monitor) = monitor {
-                let screen_size = monitor.size();
-                let window_size = window.inner_size().map_err(|e| e.to_string())?;
-
-                println!("屏幕尺寸: {}x{}", screen_size.width, screen_size.height);
-                println!("窗口尺寸: {}x{}", window_size.width, window_size.height);
-
-                // 计算右下角位置，留出边距避免遮挡
-                let margin_x = 120;
-                let margin_y = 120;
-                let x = screen_size.width as i32 - window_size.width as i32 - margin_x;
-                let y = screen_size.height as i32 - window_size.height as i32 - margin_y;
-
-                println!("计算位置: x={}, y={}", x, y);
-
-                // 确保窗口不会超出屏幕边界 - 使用更保守的边界检查
-                let final_x = x.max(50).min(screen_size.width as i32 - window_size.width as i32 - 50);
-                let final_y = y.max(50).min(screen_size.height as i32 - window_size.height as i32 - 50);
-
-                println!("最终定位Live2D窗口到: x={}, y={} (屏幕: {}x{}, 窗口: {}x{})",
-                    final_x, final_y,
-                    screen_size.width, screen_size.height,
-                    window_size.width, window_size.height);
-
-                // 设置窗口位置
-                window.set_position(tauri::Position::Physical(tauri::PhysicalPosition { x: final_x, y: final_y }))
-                    .map_err(|e| e.to_string())?;
-
-                // 确保窗口置顶
-                let _ = window.set_always_on_top(true);
-
-                // 再次确保窗口位置（防止被系统移动）
-                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-                let _ = window.set_position(tauri::Position::Physical(tauri::PhysicalPosition { x: final_x, y: final_y }));
-
-                println!("窗口定位完成");
-            } else {
-                println!("无法获取显示器信息");
-            }
-        } else {
-            println!("无法获取当前显示器");
-        }
-    } else {
-        println!("无法找到Live2D窗口");
-    }
-    Ok(())
+    window_manager::position_live2d_window(app).await
 }
 
 #[tauri::command]
 async fn resize_live2d_window(app: AppHandle, width: f64, height: f64) -> Result<(), String> {
     if let Some(window) = app.get_webview_window("live2d") {
-        // 确保最小尺寸
-        let final_width = width.max(120.0);
-        let final_height = height.max(180.0);
-
-        // 设置窗口大小
-        window.set_size(tauri::Size::Physical(tauri::PhysicalSize {
-            width: final_width as u32,
-            height: final_height as u32,
-        })).map_err(|e| e.to_string())?;
-
-        // 短暂延迟后重新定位到右下角
-        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-        if let Err(e) = position_live2d_window(app).await {
-            eprintln!("重新定位窗口失败: {}", e);
-        }
-
-        println!("调整Live2D窗口尺寸到: {}x{}", final_width, final_height);
-    }
-    Ok(())
-}
-
-#[tauri::command]
-async fn get_window_position(app: AppHandle) -> Result<(i32, i32), String> {
-    if let Some(window) = app.get_webview_window("live2d") {
-        let position = window.outer_position().map_err(|e| e.to_string())?;
-        Ok((position.x, position.y))
-    } else {
-        Err("无法获取Live2D窗口".to_string())
-    }
-}
-
-#[tauri::command]
-async fn set_window_position(app: AppHandle, x: i32, y: i32) -> Result<(), String> {
-    if let Some(window) = app.get_webview_window("live2d") {
-        window.set_position(tauri::Position::Physical(tauri::PhysicalPosition { x, y }))
+        window
+            .set_size(tauri::Size::Physical(tauri::PhysicalSize {
+                width: width as u32,
+                height: height as u32,
+            }))
             .map_err(|e| e.to_string())?;
     }
     Ok(())
 }
 
 #[tauri::command]
-async fn exit_app() -> Result<(), String> {
-    // 给前端一点时间来显示成功消息
-    std::thread::sleep(std::time::Duration::from_millis(100));
-    std::process::exit(0);
-}
-
-// 窗口管理器结构 - 跨平台实现
-#[derive(Clone)]
-struct WindowManager {
-    is_dragging: Arc<Mutex<bool>>,
-    app_handle: AppHandle,
-}
-
-impl WindowManager {
-    fn new(app_handle: AppHandle) -> Self {
-        Self {
-            is_dragging: Arc::new(Mutex::new(false)),
-            app_handle,
-        }
-    }
-
-    fn start_global_mouse_tracking(&self) {
-        let is_dragging = self.is_dragging.clone();
-        let _app_handle = self.app_handle.clone();
-
-        thread::spawn(move || {
-            // 跨平台鼠标跟踪实现
-            println!("启动全局鼠标跟踪 (跨平台模式)");
-
-            loop {
-                // 检查是否处于拖拽状态
-                let should_track = {
-                    let is_dragging_guard = is_dragging.lock().unwrap();
-                    !*is_dragging_guard
-                };
-
-                if should_track {
-                    // 这里可以添加跨平台的鼠标位置获取逻辑
-                    // 由于我们已经在Web端实现了鼠标跟随，Rust端主要负责窗口管理
-                    // 所以我们可以简化这个实现，或者使用其他跨平台的方案
-
-                    // 暂时使用占位符，实际上鼠标跟随已经在Web端通过Tauri事件处理了
-                    // 我们可以在这里添加其他需要的功能，比如周期性状态检查
-                }
-
-                thread::sleep(Duration::from_millis(16)); // ~60fps
-            }
-        });
+async fn get_window_position(app: AppHandle) -> Result<(f64, f64), String> {
+    if let Some(window) = app.get_webview_window("live2d") {
+        Ok(window
+            .outer_position()
+            .map_err(|e| e.to_string())
+            .map(|pos| (pos.x as f64, pos.y as f64))?)
+    } else {
+        Err("窗口不存在".to_string())
     }
 }
 
-// 启动全局鼠标跟踪
 #[tauri::command]
-async fn start_mouse_tracking(app: AppHandle) -> Result<(), String> {
-    let window_manager = WindowManager::new(app);
-    window_manager.start_global_mouse_tracking();
+async fn set_window_position(app: AppHandle, x: f64, y: f64) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window("live2d") {
+        window
+            .set_position(tauri::Position::Physical(tauri::PhysicalPosition {
+                x: x as i32,
+                y: y as i32,
+            }))
+            .map_err(|e| e.to_string())?;
+    }
     Ok(())
 }
 
-// 开始窗口拖拽 - 使用Tauri 2.x原生拖拽
+#[tauri::command]
+async fn start_mouse_tracking(app: AppHandle) -> Result<(), String> {
+    use tauri::Emitter;
+
+    println!("🖱️ 开始全局鼠标跟踪");
+
+    // 获取 live2d 窗口
+    let window = match app.get_webview_window("live2d") {
+        Some(w) => w,
+        None => {
+            println!("❌ 找不到 live2d 窗口");
+            return Err("找不到 live2d 窗口".to_string());
+        }
+    };
+
+    // 启动一个后台线程持续获取鼠标位置
+    tauri::async_runtime::spawn(async move {
+        loop {
+            // 每 16ms (约 60fps) 获取一次鼠标位置
+            tokio::time::sleep(tokio::time::Duration::from_millis(16)).await;
+
+            // 使用 window.cursor_position() 获取相对于窗口的鼠标位置
+            if let Ok(position) = window.cursor_position() {
+                // 发送鼠标位置事件到前端
+                let payload = serde_json::json!({
+                    "x": position.x,
+                    "y": position.y
+                });
+                let _ = window.emit("mouse_position", payload);
+            }
+        }
+    });
+
+    println!("✅ 全局鼠标跟踪已启动");
+    Ok(())
+}
+
 #[tauri::command]
 async fn start_manual_drag(app: AppHandle) -> Result<(), String> {
     if let Some(window) = app.get_webview_window("live2d") {
-        // Tauri 2.x 使用 start_dragging() 方法启用系统级拖拽
-        window.start_dragging().map_err(|e| {
-            format!("启动拖拽失败: {}", e)
-        })?;
+        window.start_dragging().map_err(|e| e.to_string())?;
     }
     Ok(())
 }
 
-// 设置窗口透明度
-#[tauri::command]
-async fn set_window_opacity(app: AppHandle, window_label: String, opacity: f64) -> Result<(), String> {
-    if let Some(window) = app.get_webview_window(&window_label) {
-        // Tauri 2.x 设置透明度的方法 - 通过JS注入实现
-        let opacity_js = format!("document.body.style.opacity = {}; document.documentElement.style.opacity = {}", opacity, opacity);
-        window.eval(&opacity_js).map_err(|e| e.to_string())?;
-
-        // 透明度已通过JavaScript设置完成
-
-        Ok(())
-    } else {
-        Err(format!("找不到窗口: {}", window_label))
-    }
-}
-
-// 切换窗口置顶状态
-#[tauri::command]
-async fn toggle_always_on_top(app: AppHandle) -> Result<bool, String> {
-    if let Some(window) = app.get_webview_window("live2d") {
-        // 获取当前置顶状态
-        let current_topmost = window.is_always_on_top().map_err(|e| e.to_string())?;
-
-        // 切换状态
-        let new_topmost = !current_topmost;
-        window.set_always_on_top(new_topmost).map_err(|e| e.to_string())?;
-
-        Ok(new_topmost)
-    } else {
-        Err("找不到Live2D窗口".to_string())
-    }
-}
-
-// 重置窗口位置到右下角
-#[tauri::command]
-async fn reset_window_position(app: AppHandle) -> Result<(), String> {
-    if let Some(window) = app.get_webview_window("live2d") {
-        // 获取屏幕尺寸
-        if let Some(monitor) = window.current_monitor().map_err(|e| e.to_string())? {
-            let screen_size = monitor.size();
-
-            // 获取窗口尺寸
-            if let Ok(window_size) = window.outer_size() {
-                // 计算右下角位置（留出边距）
-                let margin = 50;
-                let x = screen_size.width as i32 - window_size.width as i32 - margin;
-                let y = screen_size.height as i32 - window_size.height as i32 - margin;
-
-                // 确保窗口不会超出屏幕边界
-                let final_x = x.max(50).min(screen_size.width as i32 - window_size.width as i32 - 50);
-                let final_y = y.max(50).min(screen_size.height as i32 - window_size.height as i32 - 50);
-
-                window.set_position(tauri::Position::Physical(tauri::PhysicalPosition {
-                    x: final_x,
-                    y: final_y
-                })).map_err(|e| e.to_string())?;
-
-                Ok(())
-            } else {
-                Err("无法获取窗口尺寸".to_string())
-            }
-        } else {
-            Err("无法获取屏幕信息".to_string())
-        }
-    } else {
-        Err("找不到Live2D窗口".to_string())
-    }
-}
-
-// 显示关于对话框
-#[tauri::command]
-async fn show_about_dialog() -> Result<String, String> {
-    let about_text = "🐠 ReefTotem Assistant v0.1.2\n\n🎭 一个基于Live2D的智能数字人助手\n\n✨ 功能特性：\n• Live2D 实时渲染\n• 智能鼠标跟踪\n• 窗口透明度调节\n• 多窗口支持\n• 右键交互菜单\n\n🛠️ 技术栈：\n• Tauri 2.8.5\n• React 19 + TypeScript\n• Live2D Cubism SDK\n• Vite 7.x\n\n📝 开发进度：\n✅ v0.1.1 - 基础Live2D功能\n✅ v0.1.2 - 右键菜单系统\n✅ v0.1.3 - 性能优化 (当前)\n🚀 Phase 2 - AI语音对话 (即将推出)\n\n© 2025 ReefTotem Team".to_string();
-
-    Ok(about_text)
-}
-
-// 手动窗口拖拽 - 处理透明窗口拖拽问题
 #[tauri::command]
 async fn start_window_drag(app: AppHandle) -> Result<(), String> {
     if let Some(window) = app.get_webview_window("live2d") {
-        // 首先尝试Tauri原生的拖拽方法
-        let _ = window.start_dragging();
-        Ok(())
-    } else {
-        Err("无法找到Live2D窗口".to_string())
+        window.start_dragging().map_err(|e| e.to_string())?;
     }
-}
-
-// 辅助函数：更新菜单状态
-fn update_menu_state_from_handle(_app: &AppHandle, is_pet_visible: bool, current_persona: &str) -> Result<(), String> {
-    // 尝试获取托盘图标并更新菜单项状态
-    // 注意：由于Tauri v2的限制，我们无法直接更新菜单项状态
-    // 这里提供一个框架，实际实现可能需要使用其他方法
-    if is_pet_visible {
-        println!("宠物已显示 - 显示按钮应禁用，隐藏按钮应启用");
-    } else {
-        println!("宠物已隐藏 - 显示按钮应启用，隐藏按钮应禁用");
-    }
-    println!("当前数字人: {}", current_persona);
     Ok(())
 }
 
+// set_window_opacity 函数已移除，因为Tauri v2中没有相应的权限
+// #[tauri::command]
+// async fn set_window_opacity(app: AppHandle, _opacity: f64) -> Result<(), String> {
+//     if let Some(window) = app.get_webview_window("live2d") {
+//         window.set_decorations(false).map_err(|e| e.to_string())?;
+//         // 注意：透明度设置可能需要特殊处理
+//     }
+//     Ok(())
+// }
 
-// 菜单状态管理结构
-#[derive(Clone)]
-struct MenuState {
-    is_pet_visible: bool,
-    current_persona: String,
-}
-
-impl MenuState {
-    fn new() -> Self {
-        Self {
-            is_pet_visible: false,
-            current_persona: "haru".to_string(), // 默认使用Live2D角色
-        }
-    }
-
-    fn set_pet_visibility(&mut self, visible: bool) {
-        self.is_pet_visible = visible;
-    }
-
-    fn set_current_persona(&mut self, persona: String) {
-        self.current_persona = persona;
-    }
-
-    #[allow(dead_code)]
-    fn should_enable_show(&self) -> bool {
-        !self.is_pet_visible
-    }
-
-    #[allow(dead_code)]
-    fn should_enable_hide(&self) -> bool {
-        self.is_pet_visible
+#[tauri::command]
+async fn toggle_always_on_top(app: AppHandle) -> Result<bool, String> {
+    if let Some(window) = app.get_webview_window("live2d") {
+        let always_on_top = window.is_always_on_top().map_err(|e| e.to_string())?;
+        window
+            .set_always_on_top(!always_on_top)
+            .map_err(|e| e.to_string())?;
+        println!("窗口置顶状态切换为: {}", !always_on_top);
+        Ok(!always_on_top)
+    } else {
+        Err("窗口不存在".to_string())
     }
 }
+
+#[tauri::command]
+async fn reset_window_position(app: AppHandle) -> Result<(), String> {
+    window_manager::position_live2d_window(app).await
+}
+
+#[tauri::command]
+async fn debug_right_click_menu(model_name: String) -> Result<(), String> {
+    println!("🖱️ 右键菜单被触发! 切换到模型: {}", model_name);
+    Ok(())
+}
+
+// ========== 主应用入口 ==========
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -451,6 +566,7 @@ pub fn run() {
             show_live2d_window,
             show_live2d_window_with_animation,
             hide_live2d_window,
+            switch_live2d_model,
             is_live2d_visible,
             trigger_hide_animation,
             position_live2d_window,
@@ -460,277 +576,186 @@ pub fn run() {
             start_mouse_tracking,
             start_manual_drag,
             start_window_drag,
-            set_window_opacity,
             toggle_always_on_top,
             reset_window_position,
-            show_about_dialog,
-            exit_app
+            debug_right_click_menu,
         ])
         .setup(|app| {
-            use tauri::Manager;
+            println!("🚀 Tauri应用启动");
 
-            // 获取窗口引用
-            let main_window = app.get_webview_window("main").unwrap();
-            let live2d_window = app.get_webview_window("live2d").unwrap();
-
-            // 立即设置Live2D窗口位置到右下角
-            if let Err(e) = tauri::async_runtime::block_on(async {
-                position_live2d_window(app.handle().clone()).await
-            }) {
-                eprintln!("初始定位Live2D窗口失败: {}", e);
-            }
-
-            // 启动全局鼠标跟踪
-            if let Err(e) = tauri::async_runtime::block_on(async {
-                start_mouse_tracking(app.handle().clone()).await
-            }) {
-                eprintln!("启动全局鼠标跟踪失败: {}", e);
-            }
-
-            // 创建菜单状态管理
-            let menu_state = Arc::new(Mutex::new(MenuState::new()));
-
-            // 初始化宠物状态
-            if let Ok(is_visible) = live2d_window.is_visible() {
-                if let Ok(mut state) = menu_state.lock() {
-                    state.set_pet_visibility(is_visible);
-                }
-            }
-
-            // 获取当前数字人状态
-            let current_persona = {
-                if let Ok(state) = menu_state.lock() {
-                    state.current_persona.clone()
-                } else {
-                    "haru".to_string() // 默认使用Live2D角色
-                }
+            // 创建应用状态
+            let app_state = AppState {
+                tray_icon: Arc::new(Mutex::new(None)),
             };
 
-            // 创建菜单项 - 使用自定义ID以便后续管理
-            let show_live2d_i = MenuItem::with_id(app, "show_pet", "显示宠物", true, None::<&str>)?;
-            let hide_live2d_i = MenuItem::with_id(app, "hide_pet", "隐藏宠物", true, None::<&str>)?;
-            let separator1 = PredefinedMenuItem::separator(app)?;
+            // 创建共享状态
+            let menu_state = Arc::new(Mutex::new(window_state::WindowState::new()));
 
-            // 创建数字人子菜单
-            let persona_submenu = Submenu::with_id(app, "persona_submenu", "切换数字人", true)?;
-
-            // Live2D角色列表
-            let live2d_personas = vec![
-                ("haru", "Haru", "🌸"),
-                ("hiyori", "Hiyori", "🌺"),
-                ("mark", "Mark", "🌟"),
-                ("tsumiki", "Tsumiki", "🎀"),
-                ("mao", "Mao", "🔥"),
-                ("hibiki", "Hibiki", "🎸"),
-                ("haru_greeter", "Haru Greeter", "👋"),
-                ("izumi", "Izumi", "💎"),
-                ("epsilon", "Epsilon", "🚀"),
-                ("chitose", "Chitose", "🌸"),
-                ("shizuku", "Shizuku", "🍃"),
-            ];
-
-            // 直接添加Live2D角色（移除Canvas角色）
-            for (id, name, emoji) in live2d_personas {
-                let display_name = if current_persona == id {
-                    format!("{} {} ✓", emoji, name)
-                } else {
-                    format!("{} {}", emoji, name)
-                };
-
-                let persona_item = MenuItem::with_id(
-                    app,
-                    format!("{}_persona", id),
-                    display_name,
-                    true,
-                    None::<&str>
-                )?;
-                persona_submenu.append(&persona_item)?;
+            // 初始化窗口
+            if let Err(e) = initialize_windows(&app.handle(), &menu_state) {
+                eprintln!("❌ 窗口初始化失败: {}", e);
             }
 
-            let separator2 = PredefinedMenuItem::separator(app)?;
-            let quit_i = MenuItem::with_id(app, "quit_app", "退出应用", true, None::<&str>)?;
-
-            // 创建主菜单
-            let menu = Menu::with_items(app, &[
-                &show_live2d_i,
-                &hide_live2d_i,
-                &separator1,
-                &persona_submenu,
-                &separator2,
-                &quit_i,
-            ])?;
-
-            // 创建托盘图标 - 完整版本
-            let tray = TrayIconBuilder::new()
-                .menu(&menu)
-                .show_menu_on_left_click(true)  // 左键点击显示菜单
-                .tooltip("Reeftotem Assistant")
-                .icon(app.default_window_icon().unwrap().clone())
-                .build(app)?;
-
-            // 存储托盘引用以便后续使用
-            app.manage(tray);
-
-            // 处理菜单事件 - 使用Tauri 2.x的正确API
-            let app_handle = app.handle().clone();
-            let menu_state_clone = menu_state.clone();
-
-            app.on_menu_event(move |_window, event| {
-                match event.id.as_ref() {
-                    "show_pet" => {
-                        // 显示宠物窗口并触发显示动画
-                        if let Err(e) = tauri::async_runtime::block_on(async {
-                            show_live2d_window_with_animation(app_handle.clone()).await
-                        }) {
-                            eprintln!("显示宠物失败: {}", e);
-                        } else {
-                            // 更新状态
-                            if let Ok(mut state) = menu_state_clone.lock() {
-                                state.set_pet_visibility(true);
-                            }
-                        }
+            // 设置托盘并保存到状态中
+            match setup_tray(&app.handle(), menu_state) {
+                Ok(tray) => {
+                    if let Ok(mut tray_state) = app_state.tray_icon.lock() {
+                        *tray_state = Some(tray);
+                        println!("✅ 托盘图标已保存到应用状态");
                     }
-                    "hide_pet" => {
-                        // 触发隐藏动画
-                        if let Err(e) = tauri::async_runtime::block_on(async {
-                            trigger_hide_animation(app_handle.clone()).await
-                        }) {
-                            eprintln!("隐藏宠物失败: {}", e);
-                        } else {
-                            // 更新状态
-                            if let Ok(mut state) = menu_state_clone.lock() {
-                                state.set_pet_visibility(false);
-                            }
-                        }
-                    }
-                      // Live2D角色事件处理
-                    persona_id if persona_id.ends_with("_persona") && persona_id.starts_with("haru") => {
-                        let persona_name = if persona_id == "haru_greeter_persona" {
-                            "haru_greeter"
-                        } else {
-                            "haru"
-                        };
-                        if let Err(e) = tauri::async_runtime::block_on(async {
-                            switch_persona(app_handle.clone(), persona_name.to_string()).await
-                        }) {
-                            eprintln!("切换到{}失败: {}", persona_name, e);
-                        } else {
-                            if let Ok(mut state) = menu_state_clone.lock() {
-                                state.set_current_persona(persona_name.to_string());
-                            }
-                        }
-                    }
-                    persona_id if persona_id.ends_with("_persona") && persona_id.starts_with("hiyori") => {
-                        if let Err(e) = tauri::async_runtime::block_on(async {
-                            switch_persona(app_handle.clone(), "hiyori".to_string()).await
-                        }) {
-                            eprintln!("切换到Hiyori失败: {}", e);
-                        } else {
-                            if let Ok(mut state) = menu_state_clone.lock() {
-                                state.set_current_persona("hiyori".to_string());
-                            }
-                        }
-                    }
-                    persona_id if persona_id.ends_with("_persona") && persona_id.starts_with("mark") => {
-                        if let Err(e) = tauri::async_runtime::block_on(async {
-                            switch_persona(app_handle.clone(), "mark".to_string()).await
-                        }) {
-                            eprintln!("切换到Mark失败: {}", e);
-                        } else {
-                            if let Ok(mut state) = menu_state_clone.lock() {
-                                state.set_current_persona("mark".to_string());
-                            }
-                        }
-                    }
-                    persona_id if persona_id.ends_with("_persona") && persona_id.starts_with("tsumiki") => {
-                        if let Err(e) = tauri::async_runtime::block_on(async {
-                            switch_persona(app_handle.clone(), "tsumiki".to_string()).await
-                        }) {
-                            eprintln!("切换到Tsumiki失败: {}", e);
-                        } else {
-                            if let Ok(mut state) = menu_state_clone.lock() {
-                                state.set_current_persona("tsumiki".to_string());
-                            }
-                        }
-                    }
-                    persona_id if persona_id.ends_with("_persona") && persona_id.starts_with("mao") => {
-                        if let Err(e) = tauri::async_runtime::block_on(async {
-                            switch_persona(app_handle.clone(), "mao".to_string()).await
-                        }) {
-                            eprintln!("切换到Mao失败: {}", e);
-                        } else {
-                            if let Ok(mut state) = menu_state_clone.lock() {
-                                state.set_current_persona("mao".to_string());
-                            }
-                        }
-                    }
-                    persona_id if persona_id.ends_with("_persona") && persona_id.starts_with("hibiki") => {
-                        if let Err(e) = tauri::async_runtime::block_on(async {
-                            switch_persona(app_handle.clone(), "hibiki".to_string()).await
-                        }) {
-                            eprintln!("切换到Hibiki失败: {}", e);
-                        } else {
-                            if let Ok(mut state) = menu_state_clone.lock() {
-                                state.set_current_persona("hibiki".to_string());
-                            }
-                        }
-                    }
-                    persona_id if persona_id.ends_with("_persona") && persona_id.starts_with("izumi") => {
-                        if let Err(e) = tauri::async_runtime::block_on(async {
-                            switch_persona(app_handle.clone(), "izumi".to_string()).await
-                        }) {
-                            eprintln!("切换到Izumi失败: {}", e);
-                        } else {
-                            if let Ok(mut state) = menu_state_clone.lock() {
-                                state.set_current_persona("izumi".to_string());
-                            }
-                        }
-                    }
-                    persona_id if persona_id.ends_with("_persona") && persona_id.starts_with("epsilon") => {
-                        if let Err(e) = tauri::async_runtime::block_on(async {
-                            switch_persona(app_handle.clone(), "epsilon".to_string()).await
-                        }) {
-                            eprintln!("切换到Epsilon失败: {}", e);
-                        } else {
-                            if let Ok(mut state) = menu_state_clone.lock() {
-                                state.set_current_persona("epsilon".to_string());
-                            }
-                        }
-                    }
-                    persona_id if persona_id.ends_with("_persona") && persona_id.starts_with("chitose") => {
-                        if let Err(e) = tauri::async_runtime::block_on(async {
-                            switch_persona(app_handle.clone(), "chitose".to_string()).await
-                        }) {
-                            eprintln!("切换到Chitose失败: {}", e);
-                        } else {
-                            if let Ok(mut state) = menu_state_clone.lock() {
-                                state.set_current_persona("chitose".to_string());
-                            }
-                        }
-                    }
-                    persona_id if persona_id.ends_with("_persona") && persona_id.starts_with("shizuku") => {
-                        if let Err(e) = tauri::async_runtime::block_on(async {
-                            switch_persona(app_handle.clone(), "shizuku".to_string()).await
-                        }) {
-                            eprintln!("切换到Shizuku失败: {}", e);
-                        } else {
-                            if let Ok(mut state) = menu_state_clone.lock() {
-                                state.set_current_persona("shizuku".to_string());
-                            }
-                        }
-                    }
-                    "quit_app" => {
-                        // 优雅退出应用
-                        let _ = main_window.emit("app-exit", ());
-                        std::thread::sleep(std::time::Duration::from_millis(300));
-                        std::process::exit(0);
-                    }
-                    _ => {}
                 }
-            });
+                Err(e) => {
+                    eprintln!("❌ 托盘设置失败: {}", e);
+                }
+            }
+
+            // 将应用状态添加到Tauri应用中
+            app.manage(app_state);
 
             Ok(())
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+/// 初始化窗口
+fn initialize_windows(
+    app: &AppHandle,
+    _menu_state: &Arc<Mutex<window_state::WindowState>>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    println!("🏠 初始化窗口...");
+
+    // 延迟显示和定位窗口
+    let app_clone = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_secs(1));
+
+        if let Err(e) = tauri::async_runtime::block_on(async {
+            window_manager::position_live2d_window(app_clone.clone()).await
+        }) {
+            eprintln!("窗口定位失败: {}", e);
+        }
+    });
+
+    Ok(())
+}
+
+/// 设置托盘
+fn setup_tray(
+    app: &AppHandle,
+    menu_state: Arc<Mutex<window_state::WindowState>>,
+) -> Result<TrayIcon, Box<dyn std::error::Error>> {
+    println!("🎯 设置系统托盘...");
+
+    // 创建菜单
+    let menu = tray_manager::create_tray_menu(app, menu_state.clone())?;
+
+    // 创建托盘图标 - 使用内置图标或生成一个简单的图标
+    let tray_menu_state = menu_state.clone();
+
+    // 尝试创建一个简单的图标
+    let icon_data = create_tray_icon_data()?;
+
+    let tray = TrayIconBuilder::with_id("main") // 设置托盘图标ID，用于后续更新菜单
+        .menu(&menu)
+        .icon(icon_data)
+        .show_menu_on_left_click(true)
+        .tooltip("Live2D Assistant")
+        .on_menu_event(move |app, event| {
+            println!("🎯 托盘菜单事件: {:?}", event.id);
+            match event.id.as_ref() {
+                "show_pet" => {
+                    println!("📺 显示宠物请求");
+                    if let Err(e) = tauri::async_runtime::block_on(async {
+                        window_manager::show_live2d_window(app.clone()).await
+                    }) {
+                        eprintln!("❌ 显示宠物失败: {}", e);
+                    }
+                }
+                "hide_pet" => {
+                    println!("📺 隐藏宠物请求");
+                    if let Err(e) = tauri::async_runtime::block_on(async {
+                        window_manager::hide_live2d_window(app.clone()).await
+                    }) {
+                        eprintln!("❌ 隐藏宠物失败: {}", e);
+                    }
+                }
+                _ => {
+                    // 处理角色切换事件
+                    if let Err(e) =
+                        tray_manager::handle_tray_event(app, &event.id, tray_menu_state.clone())
+                    {
+                        eprintln!("托盘事件处理失败: {}", e);
+                    }
+                }
+            }
+        })
+        .build(app)?;
+
+    println!("✅ 系统托盘设置完成");
+    Ok(tray)
+}
+
+/// 创建托盘图标数据
+fn create_tray_icon_data() -> Result<Image<'static>, Box<dyn std::error::Error>> {
+    // 尝试从文件加载白色logo作为托盘图标
+    let icon_path = "./icons/tray_white_32.png";
+
+    match fs::read(icon_path) {
+        Ok(icon_data) => {
+            // 尝试解码PNG图片
+            match image::load_from_memory(&icon_data) {
+                Ok(img) => {
+                    // 转换为RGBA格式
+                    let rgba_img = img.to_rgba8();
+                    let (width, height) = rgba_img.dimensions();
+                    let rgba = rgba_img.into_raw();
+
+                    println!("✅ 成功加载托盘图标: {}x{} 像素", width, height);
+                    Ok(Image::new_owned(rgba, width, height))
+                }
+                Err(e) => {
+                    eprintln!("❌ 图片解码失败: {}, 使用备用图标", e);
+                    create_fallback_tray_icon()
+                }
+            }
+        }
+        Err(e) => {
+            eprintln!("❌ 无法读取托盘图标文件: {}, 使用备用图标", e);
+            create_fallback_tray_icon()
+        }
+    }
+}
+
+/// 创建备用托盘图标（简单的白色圆形）
+fn create_fallback_tray_icon() -> Result<Image<'static>, Box<dyn std::error::Error>> {
+    // 创建一个简单的16x16 RGBA图标
+    let rgba = vec![
+        // 简单的圆形图标数据 (半透明黑色背景，白色前景)
+        0, 0, 0, 180, 0, 0, 0, 180, 0, 0, 0, 180, 0, 0, 0, 180, 0, 0, 0, 180, 255, 255, 255, 255,
+        255, 255, 255, 255, 0, 0, 0, 180, 0, 0, 0, 180, 255, 255, 255, 255, 255, 255, 255, 255, 0,
+        0, 0, 180, 0, 0, 0, 180, 255, 255, 255, 255, 255, 255, 255, 255, 0, 0, 0, 180, 0, 0, 0,
+        180, 255, 255, 255, 255, 255, 255, 255, 255, 0, 0, 0, 180, 0, 0, 0, 180, 255, 255, 255,
+        255, 255, 255, 255, 255, 0, 0, 0, 180, 0, 0, 0, 180, 255, 255, 255, 255, 255, 255, 255,
+        255, 0, 0, 0, 180, 0, 0, 0, 180, 255, 255, 255, 255, 255, 255, 255, 255, 0, 0, 0, 180, 0,
+        0, 0, 180, 255, 255, 255, 255, 255, 255, 255, 255, 0, 0, 0, 180, 0, 0, 0, 180, 255, 255,
+        255, 255, 255, 255, 255, 255, 0, 0, 0, 180, 0, 0, 0, 180, 255, 255, 255, 255, 255, 255,
+        255, 255, 0, 0, 0, 180, 0, 0, 0, 180, 255, 255, 255, 255, 255, 255, 255, 255, 0, 0, 0, 180,
+        0, 0, 0, 180, 255, 255, 255, 255, 255, 255, 255, 255, 0, 0, 0, 180, 0, 0, 0, 180, 0, 0, 0,
+        180, 0, 0, 0, 180, 0, 0, 0, 180, 0, 0, 0, 180, 0, 0, 0, 180, 0, 0, 0, 180, 0, 0, 0, 180, 0,
+        0, 0, 180, 0, 0, 0, 180, 0, 0, 0, 180, 0, 0, 0, 180,
+    ];
+
+    println!("✅ 使用备用托盘图标");
+    Ok(Image::new_owned(rgba, 16, 16))
+}
+
+// 添加chrono依赖到Cargo.toml
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn it_works() {
+        let result = 2 + 2;
+        assert_eq!(result, 4);
+    }
 }

@@ -15,6 +15,8 @@ import { LAppPal } from './lapppal';
 import { LAppSubdelegate } from './lappsubdelegate';
 // 导入ResourceModel从lappdelegate
 import { ResourceModel } from './lappdelegate';
+// 导入模型定位诊断工具
+import { modelPositionDiagnostic } from '../../../utils/modelPositionDiagnostic';
 // 注意：移除了path模块导入，因为在浏览器环境中不可用
 
 /**
@@ -80,9 +82,7 @@ export class LAppLive2DManager {
    * モデルの更新処理及び描画処理を行う
    */
   public onUpdate(): void {
-    const { width, height } = this._subdelegate.getCanvas();
-    console.log('LAppLive2DManager.onUpdate: Canvas尺寸:', width, 'x', height);
-    console.log('LAppLive2DManager.onUpdate: 模型数量:', this._models.getSize());
+    const { width, height } = this._subdelegate?.getCanvas() ?? { width: 100, height: 100 };
 
     const projection: CubismMatrix44 = new CubismMatrix44();
     const model: LAppModel = this._models.at(0);
@@ -90,33 +90,47 @@ export class LAppLive2DManager {
       console.warn('LAppLive2DManager.onUpdate: 没有可用的模型');
       return;
     }
+    
     if (model.getModel()) {
-      console.log('LAppLive2DManager.onUpdate: 模型已加载，开始设置投影矩阵');
-      if (model.getModel().getCanvasWidth() > 1.0 && width < height) {
-        // 横に長いモデルを縦長ウィンドウに表示する際モデルの横サイズでscaleを算出する
-        model.getModelMatrix().setWidth(2.0);
+      // 🔧 修复：移除每帧缩放检查，只在模型加载时应用一次
+      // 缩放逻辑已移至 lappmodel.ts 的 setupFromLayout 方法中
+      
+      // 设置投影矩阵
+      if (width < height) {
         projection.scale(1.0, width / height);
-        console.log('LAppLive2DManager.onUpdate: 使用横向投影矩阵');
       } else {
         projection.scale(height / width, 1.0);
-        console.log('LAppLive2DManager.onUpdate: 使用纵向投影矩阵');
       }
 
-      // 必要があればここで乗算
+      // 应用视图矩阵
       if (this._viewMatrix != null) {
         projection.multiplyByMatrix(this._viewMatrix);
-        console.log('LAppLive2DManager.onUpdate: 应用视图矩阵');
+      }
+
+      // 🩺 模型定位诊断 - 记录绘制前的位置信息（仅在调试模式下）
+      if (LAppDefine.DebugLogEnable) {
+        try {
+          const canvas = this._subdelegate?.getCanvas();
+          if (canvas) {
+            modelPositionDiagnostic.recordModelPosition(
+              this._character?.name || 'Unknown',
+              model,
+              canvas as HTMLCanvasElement,
+              Array.from(projection.getArray()),
+              this._viewMatrix ? Array.from(this._viewMatrix.getArray()) : Array(16).fill(0)
+            );
+          }
+        } catch (diagError) {
+          console.warn('LAppLive2DManager.onUpdate: 诊断记录失败:', diagError);
+        }
       }
     } else {
       console.warn('LAppLive2DManager.onUpdate: 模型未加载');
     }
 
     try {
-      console.log('LAppLive2DManager.onUpdate: 开始更新模型');
       model.update();
-      console.log('LAppLive2DManager.onUpdate: 开始绘制模型');
-      model.draw(projection); // 参照渡しなのでprojectionは変質する。
-      console.log('LAppLive2DManager.onUpdate: 模型绘制完成');
+      model.draw(projection);
     } catch (error) {
       console.error('LAppLive2DManager.onUpdate: 模型更新或绘制失败:', error);
     }
@@ -176,7 +190,7 @@ export class LAppLive2DManager {
    * コンストラクタ
    */
   public constructor() {
-    this._subdelegate = null;
+    this._subdelegate = undefined;
     this._viewMatrix = new CubismMatrix44();
     this._models = new csmVector<LAppModel>();
     this._character = null;
@@ -194,7 +208,9 @@ export class LAppLive2DManager {
    */
   public initialize(subdelegate: LAppSubdelegate): void {
     this._subdelegate = subdelegate;
-    this.changeCharacter(this._character);
+    if (this._character) {
+      this.changeCharacter(this._character);
+    }
   }
 
   public changeCharacter(character: ResourceModel | null) {
@@ -209,16 +225,26 @@ export class LAppLive2DManager {
     const characterLink = character.link;
     console.log('LAppLive2DManager.changeCharacter: 角色链接:', characterLink);
 
-    // 提取目录路径 - 使用字符串操作代替path.dirname
-    const lastSlashIndex = characterLink.lastIndexOf('/');
+    // 检查传入的是完整路径还是目录路径
     let dir: string;
-    if (lastSlashIndex !== -1) {
-      dir = characterLink.substring(0, lastSlashIndex + 1);
+    let modelJsonName: string;
+
+    if (characterLink.endsWith('.model3.json')) {
+      // 传入的是完整的.model3.json文件路径
+      const lastSlashIndex = characterLink.lastIndexOf('/');
+      if (lastSlashIndex !== -1) {
+        dir = characterLink.substring(0, lastSlashIndex + 1);
+        modelJsonName = characterLink.substring(lastSlashIndex + 1);
+      } else {
+        dir = './';
+        modelJsonName = characterLink;
+      }
     } else {
-      dir = './'; // 如果没有路径分隔符，使用当前目录
+      // 传入的是目录路径，构建文件名
+      dir = characterLink.endsWith('/') ? characterLink : characterLink + '/';
+      modelJsonName = `${character.name}.model3.json`;
     }
 
-    let modelJsonName: string = `${character.name}.model3.json`;
     console.log(`LAppLive2DManager.changeCharacter: 目录=${dir}, 文件=${modelJsonName}`);
 
     if (LAppDefine.DebugLogEnable) {
@@ -231,76 +257,153 @@ export class LAppLive2DManager {
     console.log('LAppLive2DManager.changeCharacter: LAppModel实例创建完成');
     instance.setSubdelegate(this._subdelegate);
     console.log('LAppLive2DManager.changeCharacter: 开始调用loadAssets');
-    instance.loadAssets(dir, modelJsonName);
-    console.log('LAppLive2DManager.changeCharacter: loadAssets调用完成');
-    this._models.pushBack(instance);
-    this._character = character;
-    console.log('LAppLive2DManager.changeCharacter: 角色切换完成');
 
-    // 延迟获取模型边界框并调整窗口
-    setTimeout(() => {
-      this.adjustWindowSizeToModel();
-    }, 3000);
+    // 🚀 重要修复：等待模型加载完成后再添加到模型列表
+    // 保存原始的loadAssets方法
+    const originalLoadAssets = instance.loadAssets.bind(instance);
+
+    // 重写loadAssets以确保加载完成后才触发后续操作
+    instance.loadAssets = (path: string, fileName: string) => {
+      console.log(`LAppLive2DManager.changeCharacter: 开始加载模型 ${fileName}`);
+
+      // 设置加载完成的回调
+      const setupCompleteCallbacks = () => {
+        if (instance.getModel()) {
+          console.log(`✅ LAppLive2DManager.changeCharacter: 模型 ${fileName} 加载成功`);
+          this._models.pushBack(instance);
+          this._character = character;
+          console.log('LAppLive2DManager.changeCharacter: 角色切换完成');
+
+          // 🚀 优化：在模型实际加载完成后处理后续操作
+          setTimeout(() => {
+            console.log('🚀 LAppLive2DManager.changeCharacter: 模型加载完成后的处理');
+            this.adjustWindowSizeToModel();
+
+            // 强制触发重新渲染循环 - 通过通知LAppDelegate有活动
+            try {
+              // 检查全局LAppDelegate实例（浏览器环境）
+              if (typeof window !== 'undefined' && (window as any).LAppDelegate) {
+                const appDelegate = (window as any).LAppDelegate.getInstance();
+                if (appDelegate && typeof appDelegate.notifyActivity === 'function') {
+                  console.log('LAppLive2DManager.changeCharacter: 通知活动状态，重置空闲检测');
+                  appDelegate.notifyActivity();
+                }
+              }
+            } catch (error) {
+              console.warn('LAppLive2DManager.changeCharacter: 无法通知活动状态:', error);
+            }
+
+            // 🚀 修复：模型切换后强制重新应用缩放
+            // 确保新加载的模型以正确的尺寸显示
+            const model = this._models.at(0);
+            if (model && typeof model.reapplyStandardScale === 'function') {
+              console.log('🔧 模型切换：重新应用标准缩放');
+              model.reapplyStandardScale();
+            } else {
+              console.warn('⚠️ 无法重新应用缩放：模型不可用或方法不存在');
+            }
+
+            // 🚀 额外确保：在模型切换完成后，再次通知活动状态，确保渲染循环活跃
+            setTimeout(() => {
+              try {
+                if (typeof window !== 'undefined' && (window as any).LAppDelegate) {
+                  const appDelegate = (window as any).LAppDelegate.getInstance();
+                  if (appDelegate && typeof appDelegate.notifyActivity === 'function') {
+                    console.log('LAppLive2DManager.changeCharacter: 二次通知活动状态，确保渲染稳定');
+                    appDelegate.notifyActivity();
+                  }
+                }
+              } catch (error) {
+                console.warn('LAppLive2DManager.changeCharacter: 二次通知活动状态失败:', error);
+              }
+            }, 200);
+          }, 100); // 100ms后开始处理，确保模型完全就绪
+
+        } else {
+          console.error(`❌ LAppLive2DManager.changeCharacter: 模型 ${fileName} 加载失败`);
+        }
+      };
+
+      // 监听模型加载完成
+      const checkInterval = setInterval(() => {
+        if (instance.getModel()) {
+          clearInterval(checkInterval);
+          setupCompleteCallbacks();
+        }
+      }, 100);
+
+      // 超时检查
+      setTimeout(() => {
+        clearInterval(checkInterval);
+        if (!instance.getModel()) {
+          console.error(`❌ LAppLive2DManager.changeCharacter: 模型 ${fileName} 加载超时`);
+        }
+      }, 10000); // 10秒超时
+
+      // 调用原始的loadAssets方法
+      return originalLoadAssets(path, fileName);
+    };
+
+    instance.loadAssets(dir, modelJsonName);
+    console.log('LAppLive2DManager.changeCharacter: loadAssets调用完成（异步加载中）');
   }
 
+  
   /**
-   * 根据模型边界框调整窗口尺寸
+   * 模型切换时的位置处理 - 不再调整窗口，直接在当前位置显示
    */
   public adjustWindowSizeToModel(): void {
     const model: LAppModel = this._models.at(0);
     if (!model || !model.getModel()) {
+      console.warn('LAppLive2DManager.adjustWindowSizeToModel: 模型未加载，跳过处理');
       return;
     }
 
     try {
-      // 获取模型的Canvas宽高信息
-      const modelCanvasWidth = model.getModel().getCanvasWidth();
-      const modelCanvasHeight = model.getModel().getCanvasHeight();
+      // 🩺 详细诊断：获取模型实际尺寸信息
+      const live2DModel = model.getModel();
+      const modelCanvasWidth = live2DModel.getCanvasWidth();
+      const modelCanvasHeight = live2DModel.getCanvasHeight();
 
-      // 基础尺寸 - 超紧凑设置
-      let modelWidth = 140;
-      let modelHeight = 220;
+      console.log(`🩺 LAppLive2DManager.adjustWindowSizeToModel: 模型切换诊断:`);
+      console.log(`  - Live2D模型画布尺寸: ${modelCanvasWidth}x${modelCanvasHeight}`);
+      console.log(`  - 当前模型名称: ${this._character?.name || 'Unknown'}`);
 
-      // 根据Canvas比例调整
-      if (modelCanvasWidth > 0 && modelCanvasHeight > 0) {
-        const aspectRatio = modelCanvasWidth / modelCanvasHeight;
-        if (aspectRatio > 1) {
-          // 横向较宽的模型 - 更严格控制宽度
-          modelWidth = Math.min(180, 140 * aspectRatio);
-          modelHeight = modelWidth / aspectRatio;
-        } else {
-          // 纵向较长的模型 - 严格控制高度
-          modelHeight = Math.min(260, 220 / aspectRatio);
-          modelWidth = modelHeight * aspectRatio;
+      // 获取当前画布尺寸
+      const { width: currentWidth, height: currentHeight } = this._subdelegate?.getCanvas() ?? { width: 100, height: 100 };
+      console.log(`  - 当前画布尺寸: ${currentWidth}x${currentHeight}`);
+
+      // 🚫 不再调整窗口尺寸，使用现有窗口位置
+      console.log(`📐 模型切换：保持当前窗口位置不变 (尺寸: ${currentWidth}x${currentHeight})`);
+
+      // 简化处理：不再进行复杂的缩放计算，依赖主渲染逻辑
+
+      // 🩺 记录模型切换后的诊断信息
+      if (typeof window !== 'undefined') {
+        const canvas = this._subdelegate?.getCanvas();
+        if (canvas) {
+          modelPositionDiagnostic.recordModelPosition(
+            `${this._character?.name || 'Unknown'}_切换后`,
+            model,
+            canvas as HTMLCanvasElement,
+            Array(16).fill(0), // 投影矩阵此时未设置
+            this._viewMatrix ? Array.from(this._viewMatrix.getArray()) : Array(16).fill(0)
+          );
         }
       }
 
-      // 超小边距 - 几乎无留白
-      modelWidth += 5;
-      modelHeight += 5;
+      // 🚫 移除窗口调整调用，模型切换不再重新定位窗口
+      console.log('✅ 模型切换完成，保持当前窗口位置');
 
-      // 确保最小尺寸 - 超紧凑最小尺寸
-      modelWidth = Math.max(modelWidth, 100);
-      modelHeight = Math.max(modelHeight, 160);
-
-      console.log(`LAppLive2DManager.adjustWindowSizeToModel: 调整窗口尺寸到 ${modelWidth}x${modelHeight}`);
-
-      // 调用Tauri命令调整窗口
-      if (window.__TAURI__?.invoke) {
-        window.__TAURI__.invoke('resize_live2d_window', {
-          width: Math.round(modelWidth),
-          height: Math.round(modelHeight)
-        });
-      }
     } catch (error) {
-      console.error('调整窗口尺寸失败:', error);
+      console.error('❌ 模型切换处理失败:', error);
     }
   }
 
   /**
    * 自身が所属するSubdelegate
    */
-  private _subdelegate: LAppSubdelegate;
+  private _subdelegate: LAppSubdelegate | undefined;
 
   _viewMatrix: CubismMatrix44; // モデル描画に用いるview行列
   _models: csmVector<LAppModel>; // モデルインスタンスのコンテナ

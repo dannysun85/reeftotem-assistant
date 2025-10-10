@@ -115,7 +115,7 @@ export class LAppView {
 
     try {
       gl.useProgram(this._programId);
-      console.log('LAppView.render: 使用着色器程序');
+      // 移除每帧日志: console.log('LAppView.render: 使用着色器程序');
 
       // if (this._back) {
       //   this._back.render(this._programId);
@@ -128,7 +128,7 @@ export class LAppView {
 
       const lapplive2dmanager = this._subdelegate.getLive2DManager();
       if (lapplive2dmanager != null) {
-        console.log('LAppView.render: 更新Live2D管理器');
+        // 移除每帧日志: console.log('LAppView.render: 更新Live2D管理器');
         lapplive2dmanager.setViewMatrix(this._viewMatrix);
         lapplive2dmanager.onUpdate();
       } else {

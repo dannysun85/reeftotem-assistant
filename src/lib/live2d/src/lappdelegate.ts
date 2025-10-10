@@ -15,6 +15,7 @@ import { CubismLogError } from '../Framework/src/utils/cubismdebug';
 // 确保全局 Live2DCubismCore 可用
 declare global {
   var Live2DCubismCore: any;
+  var LAppDelegate: any; // 添加全局类型声明
 }
 // 从正确的位置导入ResourceModel
 import { ResourceModel } from '../types';
@@ -38,6 +39,11 @@ export class LAppDelegate {
   public static getInstance(): LAppDelegate {
     if (s_instance == null) {
       s_instance = new LAppDelegate();
+      // 🚀 将实例设置到全局变量，供前端组件直接访问
+      if (typeof window !== 'undefined') {
+        (window as any).LAppDelegate = LAppDelegate;
+        console.log('✅ LAppDelegate实例已设置到全局变量');
+      }
     }
 
     return s_instance;

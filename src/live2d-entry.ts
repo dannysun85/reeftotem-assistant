@@ -3,6 +3,12 @@ import ReactDOMClient from "react-dom/client";
 import { Live2DWindow } from "./pages/Live2DWindow";
 import "./index.css";
 
+// ✅ 导入 Tauri API Shim - 确保 Tauri API 正确初始化
+import "./tauri-shim";
+
+// 导入LAppDelegate用于测试
+import { LAppDelegate } from "./lib/live2d/src/lappdelegate";
+
 // 预加载Live2D Core WebAssembly模块
 async function loadLive2DCore(): Promise<void> {
     try {
@@ -58,11 +64,23 @@ async function initializeLive2DApp() {
         if (root) {
             const reactRoot = ReactDOMClient.createRoot(root);
             reactRoot.render(React.createElement(Live2DWindow));
+        } else {
+            console.error('Root element not found');
         }
     } catch (error) {
-        console.error("Live2D应用初始化失败:", error);
+        console.error("Live2D app initialization failed:", error);
     }
 }
 
+// 立即将LAppDelegate暴露到全局对象，确保在React渲染前可用
+(window as any).LAppDelegate = LAppDelegate;
+
 // 开始初始化
-initializeLive2DApp();
+initializeLive2DApp().then(() => {
+    // 导入并暴露ParameterMapper
+    import('./utils/parameterMapper').then((module) => {
+        (window as any).ParameterMapper = module.default;
+    }).catch((error) => {
+        console.warn('ParameterMapper import failed:', error);
+    });
+});

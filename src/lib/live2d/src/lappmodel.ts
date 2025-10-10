@@ -83,39 +83,32 @@ export class LAppModel extends CubismUserModel {
    * @param fileName
    */
   public loadAssets(dir: string, fileName: string): void {
-    console.log(`LAppModel.loadAssets: 开始加载模型 - 目录: ${dir}, 文件: ${fileName}`);
     this._modelHomeDir = dir;
     Live2DManager.getInstance().setReady(false);
 
     const modelJsonPath = `${this._modelHomeDir}${fileName}`;
-    console.log(`LAppModel.loadAssets: 完整路径: ${modelJsonPath}`);
 
     fetch(modelJsonPath)
       .then(response => {
-        console.log(`LAppModel.loadAssets: 获取到响应: ${response.status} ${response.statusText}`);
         if (!response.ok) {
           throw new Error(`HTTP ${response.status}: ${response.statusText}`);
         }
         return response.arrayBuffer();
       })
       .then(arrayBuffer => {
-        console.log(`LAppModel.loadAssets: 成功读取文件，大小: ${arrayBuffer.byteLength} bytes`);
         const setting: ICubismModelSetting = new CubismModelSettingJson(
           arrayBuffer,
           arrayBuffer.byteLength
         );
-        console.log(`LAppModel.loadAssets: 成功解析模型设置JSON`);
 
         // ステートを更新
         this._state = LoadStep.LoadModel;
-        console.log(`LAppModel.loadAssets: 状态更新为 LoadModel`);
 
         // 結果を保存
         this.setupModel(setting);
       })
       .catch(error => {
-        // model3.json読み込みでエラーが発生した時点で描画は不可能なので、setupせずエラーをcatchして何もしない
-        console.error(`LAppModel.loadAssets: 加载文件失败 ${this._modelHomeDir}${fileName}`, error);
+        console.error(`Failed to load model ${this._modelHomeDir}${fileName}:`, error);
         CubismLogError(`Failed to load file ${this._modelHomeDir}${fileName}`);
       });
   }
@@ -404,7 +397,17 @@ export class LAppModel extends CubismUserModel {
       }
 
       this._modelSetting.getLayoutMap(layout);
+      
+      // 应用layout（会设置位置和初始大小）
       this._modelMatrix.setupFromLayout(layout);
+      
+      // 🔧 最终方案：统一使用setHeight，优先保证视觉统一性
+      // 所有模型统一使用相同的height值，确保视觉一致性
+      // 调整后的最佳值：1.3（平衡了大小和统一性）
+      const STANDARD_HEIGHT = 1.3;
+      this._modelMatrix.setHeight(STANDARD_HEIGHT);
+
+      
       this._state = LoadStep.LoadMotion;
 
       // callback
@@ -997,6 +1000,20 @@ export class LAppModel extends CubismUserModel {
     this._allMotionCount = 0;
     this._wavFileHandler = new LAppWavFileHandler();
     this._consistency = false;
+  }
+
+  /**
+   * 重新应用模型的标准缩放
+   * 用于模型切换后确保模型以正确的尺寸显示
+   */
+  public reapplyStandardScale(): void {
+    if (this._modelMatrix) {
+      const STANDARD_HEIGHT = 1.3;
+      this._modelMatrix.setHeight(STANDARD_HEIGHT);
+      console.log(`✅ LAppModel: 已重新应用标准缩放 (height=${STANDARD_HEIGHT})`);
+    } else {
+      console.warn('⚠️ LAppModel: 无法重新应用缩放，_modelMatrix 不可用');
+    }
   }
 
   private _subdelegate: LAppSubdelegate;

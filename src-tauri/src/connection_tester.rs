@@ -195,7 +195,8 @@ impl ConnectionTester {
     }
 }
 
-// Tauri命令：运行连接测试
+// Tauri命令：运行连接测试 (暂时禁用)
+/*
 #[tauri::command]
 async fn run_connection_test(
     app: tauri::AppHandle,
@@ -205,11 +206,15 @@ async fn run_connection_test(
     tester.run_test(config).await
 }
 
-// Tauri命令：运行完整诊断
+// Tauri命令：运行完整诊断 (暂时禁用)
 #[tauri::command]
 async fn run_system_diagnosis(
     app: tauri::AppHandle,
 ) -> Result<serde_json::Value, String> {
+*/
+
+    // 注释掉的函数内容
+    /*
     let tester = ConnectionTester::new(app);
 
     let test_configs = vec![
@@ -268,4 +273,4 @@ async fn run_system_diagnosis(
         "results": results,
         "recommendations": []
     }))
-}
+    */

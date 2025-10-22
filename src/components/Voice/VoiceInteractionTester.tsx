@@ -536,6 +536,7 @@ export const VoiceInteractionTester: React.FC = () => {
                 className="w-full max-w-xs"
               />
             </div>
+          </div>
         )}
       </div>
 

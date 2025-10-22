@@ -89,31 +89,52 @@ export const VoiceInteractionTester: React.FC = () => {
     const startTime = Date.now();
     setCurrentStep(stepId);
 
+    console.log(`🚀 开始执行测试步骤: ${stepId}`);
+    console.log('📊 当前状态快照:', {
+      stepId,
+      audioBlob: !!audioBlob,
+      audioBlobSize: audioBlob?.size,
+      asrResult: !!asrResult,
+      aiResponse: !!aiResponse,
+      ttsAudioUrl: !!ttsAudioUrl
+    });
+
     try {
       updateStep(stepId, { status: 'running' });
 
       switch (stepId) {
         case 'config':
+          console.log('📋 执行配置检查...');
           await testConfiguration();
           break;
         case 'permissions':
+          console.log('🎤 执行麦克风权限检查...');
           await testMicrophonePermissions();
           break;
         case 'recording':
+          console.log('🎙️ 执行录音测试...');
           await testRecording();
+          console.log('📊 录音后状态:', {
+            audioBlob: !!audioBlob,
+            audioBlobSize: audioBlob?.size
+          });
           break;
         case 'asr':
+          console.log('🔍 执行ASR测试...');
           await testASR();
           break;
         case 'ai':
+          console.log('🤖 执行AI测试...');
           await testAI();
           break;
         case 'tts':
+          console.log('🔊 执行TTS测试...');
           await testTTS();
           break;
       }
 
       const duration = Date.now() - startTime;
+      console.log(`✅ 测试步骤 ${stepId} 完成，耗时: ${duration}ms`);
       updateStep(stepId, {
         status: 'success',
         duration,
@@ -122,6 +143,7 @@ export const VoiceInteractionTester: React.FC = () => {
 
     } catch (error: any) {
       const duration = Date.now() - startTime;
+      console.error(`❌ 测试步骤 ${stepId} 失败:`, error);
       updateStep(stepId, {
         status: 'error',
         error: error.message,
@@ -129,7 +151,7 @@ export const VoiceInteractionTester: React.FC = () => {
       });
       throw error;
     }
-  }, [updateStep]);
+  }, [updateStep, audioBlob, asrResult, aiResponse, ttsAudioUrl]);
 
   // 测试配置
   const testConfiguration = async () => {
@@ -186,6 +208,10 @@ export const VoiceInteractionTester: React.FC = () => {
   // 测试录音
   const testRecording = async () => {
     console.log('🎙️ 测试录音功能...');
+    console.log('📊 录音前状态检查:', {
+      audioBlob: !!audioBlob,
+      audioBlobSize: audioBlob?.size
+    });
 
     return new Promise((resolve, reject) => {
       let mediaRecorder: MediaRecorder | null = null;
@@ -229,18 +255,30 @@ export const VoiceInteractionTester: React.FC = () => {
           };
 
           mediaRecorder.onstop = () => {
+            console.log('🛑 录音停止，处理音频数据...');
+            console.log('📊 音频块数量:', audioChunks.length);
+
             const audioBlob = new Blob(audioChunks, { type: 'audio/webm;codecs=opus' });
             const audioUrl = URL.createObjectURL(audioBlob);
+
+            console.log('🎵 录音结果:', {
+              size: audioBlob.size,
+              type: audioBlob.type,
+              chunksCount: audioChunks.length,
+              url: audioUrl
+            });
 
             setAudioBlob(audioBlob);
             updateStep('recording', {
               result: {
                 size: audioBlob.size,
                 url: audioUrl,
-                duration: 3000
+                duration: 3000,
+                chunksCount: audioChunks.length
               }
             });
 
+            console.log('✅ 录音测试完成，audioBlob已设置');
             cleanup();
             resolve(audioBlob);
           };
@@ -272,25 +310,50 @@ export const VoiceInteractionTester: React.FC = () => {
   // 测试ASR
   const testASR = async () => {
     console.log('🔍 测试语音识别...');
+    console.log('📊 检查音频数据状态:', {
+      audioBlob: !!audioBlob,
+      audioBlobSize: audioBlob?.size,
+      audioBlobType: audioBlob?.type,
+      asrResult: !!asrResult
+    });
 
     if (!audioBlob) {
+      console.error('❌ audioBlob 为空，可能的原因:');
+      console.error('  1. 录音测试失败或未完成');
+      console.error('  2. 状态被意外重置');
+      console.error('  3. 异步执行时序问题');
       throw new Error('没有可用的音频数据，请先进行录音测试');
     }
 
-    const audioBuffer = await audioBlob.arrayBuffer();
-    const result = await tencentCloudVoiceService.recognizeSpeech(audioBuffer);
-
-    if (!result || !result.text) {
-      throw new Error('语音识别失败或返回空结果');
-    }
-
-    setAsrResult(result.text);
-    updateStep('asr', {
-      result: {
-        text: result.text,
-        confidence: result.confidence
-      }
+    console.log('🎵 音频数据信息:', {
+      size: audioBlob.size,
+      type: audioBlob.type,
+      isAudioBlob: audioBlob instanceof Blob
     });
+
+    try {
+      const audioBuffer = await audioBlob.arrayBuffer();
+      console.log('📡 开始调用腾讯云ASR服务，音频数据大小:', audioBuffer.byteLength);
+
+      const result = await tencentCloudVoiceService.recognizeSpeech(audioBuffer);
+      console.log('🎯 ASR返回结果:', result);
+
+      if (!result || !result.text) {
+        console.error('❌ ASR返回无效结果:', result);
+        throw new Error('语音识别失败或返回空结果');
+      }
+
+      setAsrResult(result.text);
+      updateStep('asr', {
+        result: {
+          text: result.text,
+          confidence: result.confidence
+        }
+      });
+    } catch (error: any) {
+      console.error('❌ ASR调用失败:', error);
+      throw new Error(`语音识别失败: ${error.message}`);
+    }
   };
 
   // 测试AI模型

@@ -32,8 +32,10 @@ export const ViewLogicalMaxRight = 2.0;
 export const ViewLogicalMaxBottom = -2.0;
 export const ViewLogicalMaxTop = 2.0;
 
-// 相対パス
-export const ResourcesPath = '/assets/live2d/characters/free/';
+// 相対パス - 根据环境动态设置路径
+export const ResourcesPath = import.meta.env.DEV
+  ? '/assets/live2d/characters/free/'  // 开发环境使用绝对路径
+  : '/assets/live2d/characters/free/';  // 生产环境同样使用绝对路径
 
 // モデルの後ろにある背景の画像ファイル
 // export const BackImageName = 'back_class_normal.png';

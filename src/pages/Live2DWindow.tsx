@@ -23,6 +23,12 @@ import { isTauriEnvironment } from '../tauri-shim';
 import { LAppDelegate } from '../lib/live2d/src/lappdelegate';
 // ResourceModel 类型导入
 import { RESOURCE_TYPE } from '../lib/live2d/types';
+// 路径工具导入
+import { getLive2DModelPath, getEnvironmentInfo } from '../utils/tauriPathUtils';
+// 拖拽边缘检测Hook导入
+import { useDragEdgeDetection } from '../hooks/useDragEdgeDetection';
+// 边缘碰撞检测器导入
+import EdgeCollisionDetector, { defaultCollisionDetector } from '../utils/edgeCollisionDetector';
 
 /**
  * Live2D窗口组件（重构版）
@@ -115,19 +121,57 @@ export const Live2DWindow: React.FC = () => {
   const isInitializedRef = useRef<boolean>(false);
   // 🔧 新增：防止并发切换模型的锁
   const isSwitchingModelRef = useRef<boolean>(false);
-  
+
+  // 🔧 debugMode需要在useDragEdgeDetection之前定义
+  const [debugMode, setDebugMode] = useState<boolean>(false);
+
+  // 其他功能开关
+  const [physicsEnabled, setPhysicsEnabled] = useState<boolean>(false);
+  const [breathingEnabled, setBreathingEnabled] = useState<boolean>(false);
+  const [lipSyncEnabled, setLipSyncEnabled] = useState<boolean>(false);
+
+  // ========== 拖拽边缘检测系统 ==========
+  const {
+    constraints,
+    isInitialized: edgeDetectionInitialized,
+    error: edgeDetectionError,
+    dragState,
+    initializeConstraints,
+    constrainPosition,
+    predictCollision,
+    startDrag: startDragDetection,
+    updateDrag: updateDragDetection,
+    endDrag: endDragDetection,
+    refreshScreenInfo,
+    isNearEdge,
+    getDistanceToEdges,
+  } = useDragEdgeDetection({
+    margin: 10,
+    smoothConstraint: true,
+    debug: debugMode, // 使用调试模式设置
+    updateInterval: 500, // 每500ms更新一次约束
+  });
+
+  // 拖拽状态refs（用于同步状态检查）
+  const dragStartPosRef = useRef<{ x: number; y: number } | null>(null);
+  const lastWindowPosRef = useRef<{ x: number; y: number } | null>(null);
+  const isManualDraggingRef = useRef<boolean>(false);
+
+  // 边缘碰撞检测器实例
+  const collisionDetectorRef = useRef<EdgeCollisionDetector>(defaultCollisionDetector);
+
   // 调试: 打印初始状态
   console.log('🔍 Live2DWindow 组件初始化:', {
     eyeTrackingEnabled,
     isDragging,
     isHovering,
-    currentPersona
+    currentPersona,
+    edgeDetectionInitialized,
+    hasConstraints: !!constraints,
+    edgeDetectionError,
+    debugMode,
   });
-  const [physicsEnabled, setPhysicsEnabled] = useState<boolean>(false);
-  const [breathingEnabled, setBreathingEnabled] = useState<boolean>(false);
-  const [lipSyncEnabled, setLipSyncEnabled] = useState<boolean>(false);
-  const [debugMode, setDebugMode] = useState<boolean>(false);
-  
+
   // ========== 初始化Live2D ==========
   useEffect(() => {
     // 🔧 优化：防止重复初始化
@@ -230,7 +274,111 @@ export const Live2DWindow: React.FC = () => {
       }
     };
   }, []); // 只在挂载时设置一次
-  
+
+  // ========== 拖拽边缘约束监听器 ==========
+  useEffect(() => {
+    if (!edgeDetectionInitialized || !isTauriEnvironment()) {
+      return;
+    }
+
+    const handleGlobalMouseMove = async (event: MouseEvent) => {
+      // 只在手动拖拽状态下处理
+      if (!isManualDraggingRef.current || !dragState.isDragging) {
+        return;
+      }
+
+      try {
+        // 更新碰撞检测器的运动历史
+        collisionDetectorRef.current.updateMotionHistory(
+          { x: event.clientX, y: event.clientY },
+          Date.now()
+        );
+
+        // 预测碰撞
+        const deltaX = event.clientX - dragState.currentX;
+        const deltaY = event.clientY - dragState.currentY;
+
+        if (Math.abs(deltaX) > 1 || Math.abs(deltaY) > 1) {
+          const [willCollide, edge] = await predictCollision(deltaX, deltaY);
+
+          if (debugMode && willCollide) {
+            console.log('⚠️ 预测碰撞:', { edge, deltaX, deltaY });
+          }
+
+          // 更新拖拽位置
+          const constrained = await updateDragDetection(event.clientX, event.clientY);
+
+          if (debugMode && constrained.is_constrained) {
+            console.log('🎯 位置已约束:', constrained);
+          }
+        }
+      } catch (err) {
+        console.error('❌ 拖拽边缘约束处理失败:', err);
+      }
+    };
+
+    // 添加全局监听器
+    document.addEventListener('mousemove', handleGlobalMouseMove);
+
+    return () => {
+      document.removeEventListener('mousemove', handleGlobalMouseMove);
+    };
+  }, [
+    edgeDetectionInitialized,
+    dragState.isDragging,
+    dragState.currentX,
+    dragState.currentY,
+    predictCollision,
+    updateDragDetection,
+    debugMode
+  ]);
+
+  // 边缘状态监听（用于调试和UI反馈）
+  useEffect(() => {
+    if (!edgeDetectionInitialized || !debugMode) {
+      return;
+    }
+
+    const checkEdgeStatus = async () => {
+      if (!isManualDraggingRef.current) {
+        try {
+          const nearEdge = await isNearEdge(30);
+          const distances = await getDistanceToEdges();
+
+          if (nearEdge) {
+            console.log('📍 靠近边缘:', distances);
+          }
+        } catch (err) {
+          console.error('❌ 边缘状态检查失败:', err);
+        }
+      }
+    };
+
+    const interval = setInterval(checkEdgeStatus, 1000);
+    return () => clearInterval(interval);
+  }, [edgeDetectionInitialized, debugMode, isNearEdge, getDistanceToEdges]);
+
+  // 屏幕分辨率变化监听
+  useEffect(() => {
+    if (!edgeDetectionInitialized || !isTauriEnvironment()) {
+      return;
+    }
+
+    const handleScreenChange = () => {
+      console.log('🖥️ 检测到屏幕变化，刷新约束...');
+      refreshScreenInfo();
+    };
+
+    // 监听屏幕方向变化和分辨率变化
+    window.addEventListener('resize', handleScreenChange);
+    window.addEventListener('orientationchange', handleScreenChange);
+
+    return () => {
+      window.removeEventListener('resize', handleScreenChange);
+      window.removeEventListener('orientationchange', handleScreenChange);
+    };
+  }, [edgeDetectionInitialized, refreshScreenInfo]);
+
   // ========== 模型切换处理函数 ==========
   const handleModelSwitch = useCallback((modelName: string) => {
     console.log('🔄 handleModelSwitch 执行, 目标模型:', modelName);
@@ -284,12 +432,17 @@ export const Live2DWindow: React.FC = () => {
         return;
       }
 
+      // 使用统一的路径处理函数
+      const modelPath = getLive2DModelPath(modelName);
+
       const characterModel = {
         resource_id: 'menu_switch',
         name: modelName,
         type: RESOURCE_TYPE.CHARACTER,
-        link: `/assets/live2d/characters/free/${modelName}/${modelName}.model3.json`
+        link: modelPath
       };
+
+      console.log('🔍 模型路径:', modelPath, '环境信息:', getEnvironmentInfo());
 
       console.log('🚀 调用LAppDelegate.changeCharacter:', characterModel);
       appDelegate.changeCharacter(characterModel);
@@ -415,30 +568,64 @@ export const Live2DWindow: React.FC = () => {
       button: e.button,
       clientX: e.clientX,
       clientY: e.clientY,
-      target: e.target
+      target: e.target,
+      edgeDetectionInitialized,
+      hasConstraints: !!constraints,
     });
-    
+
     // 只处理左键,忽略右键(右键用于菜单)
     if (e.button !== 0) {
       console.log('⚠️ 不是左键点击，忽略');
       return;
     }
-    
+
     // 阻止默认行为和事件冒泡,防止触发其他事件
     e.preventDefault();
     e.stopPropagation();
-    
+
     // ✅ 立即同步设置拖拽标志 (防止眼神追踪在异步期间被触发)
     isDraggingRef.current = true;
     setIsMouseDown(true);
     setIsDragging(true);
-    
+    isManualDraggingRef.current = true;
+
+    // 记录拖拽开始位置
+    dragStartPosRef.current = { x: e.clientX, y: e.clientY };
+
     console.log('✅ 拖拽标志已设置 (同步)', {
       isDraggingRef: isDraggingRef.current,
-      isMouseDown: true
+      isMouseDown: true,
+      isManualDragging: isManualDraggingRef.current,
+      dragStartPos: dragStartPosRef.current,
     });
-    
-    // ✅ 只在 Tauri 环境中调用拖拽命令
+
+    // 初始化边缘检测约束（如果尚未初始化）
+    if (!edgeDetectionInitialized && isTauriEnvironment()) {
+      try {
+        console.log('🔄 初始化边缘检测约束...');
+        await initializeConstraints();
+        console.log('✅ 边缘检测约束初始化成功');
+      } catch (err) {
+        console.error('❌ 边缘检测约束初始化失败:', err);
+      }
+    }
+
+    // 启动边缘检测拖拽
+    if (edgeDetectionInitialized) {
+      try {
+        console.log('🎯 启动边缘检测拖拽...');
+        startDragDetection(e.clientX, e.clientY);
+
+        // 更新碰撞检测器的运动历史
+        collisionDetectorRef.current.updateMotionHistory({ x: e.clientX, y: e.clientY });
+
+        console.log('✅ 边缘检测拖拽已启动');
+      } catch (err) {
+        console.error('❌ 启动边缘检测拖拽失败:', err);
+      }
+    }
+
+    // ✅ 只在 Tauri 环境中调用拖拽命令（作为fallback）
     if (isTauriEnvironment()) {
       try {
         const { invoke } = await import('@tauri-apps/api/core');
@@ -451,6 +638,8 @@ export const Live2DWindow: React.FC = () => {
         isDraggingRef.current = false;
         setIsMouseDown(false);
         setIsDragging(false);
+        isManualDraggingRef.current = false;
+        dragStartPosRef.current = null;
       }
     } else {
       console.warn('⚠️ 非 Tauri 环境,无法拖拽');
@@ -459,18 +648,53 @@ export const Live2DWindow: React.FC = () => {
         isDraggingRef.current = false;
         setIsMouseDown(false);
         setIsDragging(false);
+        isManualDraggingRef.current = false;
+        dragStartPosRef.current = null;
       }, 100);
     }
-  }, []);
+  }, [
+    edgeDetectionInitialized,
+    constraints,
+    initializeConstraints,
+    startDragDetection
+  ]);
   
   // 拖拽结束
   const handleMouseUp = useCallback(() => {
-    console.log('🖱️ handleMouseUp - 鼠标松开');
+    console.log('🖱️ handleMouseUp - 鼠标松开', {
+      isManualDragging: isManualDraggingRef.current,
+      edgeDetectionInitialized,
+      hasDragState: dragState.isDragging,
+    });
+
     // ✅ 同步重置所有拖拽标志
     isDraggingRef.current = false;
     setIsMouseDown(false);
     setIsDragging(false);
-  }, []);
+    isManualDraggingRef.current = false;
+
+    // 结束边缘检测拖拽
+    if (edgeDetectionInitialized && dragState.isDragging) {
+      try {
+        console.log('🏁 结束边缘检测拖拽...');
+        endDragDetection();
+        console.log('✅ 边缘检测拖拽已结束');
+      } catch (err) {
+        console.error('❌ 结束边缘检测拖拽失败:', err);
+      }
+    }
+
+    // 清理拖拽相关状态
+    dragStartPosRef.current = null;
+    lastWindowPosRef.current = null;
+
+    // 清理碰撞检测器历史（可选）
+    if (debugMode) {
+      collisionDetectorRef.current.clearHistory();
+    }
+
+    console.log('✅ 所有拖拽状态已重置');
+  }, [edgeDetectionInitialized, dragState.isDragging, endDragDetection, debugMode]);
   
   // 点击事件 - 触发表情 (在拖拽完成后)
   const handleClick = useCallback((e: React.MouseEvent) => {
@@ -680,12 +904,86 @@ export const Live2DWindow: React.FC = () => {
       type: 'separator' as const
     },
     {
+      id: 'voice-interaction',
+      label: '🎤 语音交互演示',
+      action: async () => {
+        try {
+          // 直接在默认浏览器中打开本地服务器的语音交互页面
+          if (typeof window !== 'undefined') {
+            // 检测是否在Tauri环境中
+            const isTauri = '__TAURI__' in window;
+
+            if (isTauri) {
+              // 在Tauri环境中，使用shell.open打开浏览器
+              const { invoke } = await import('@tauri-apps/api/core');
+              await invoke('shell_open', {
+                url: 'http://localhost:1420/voice-interaction'
+              });
+            } else {
+              // 在浏览器环境中，直接跳转
+              window.open('http://localhost:1420/voice-interaction', '_blank');
+            }
+          }
+        } catch (err) {
+          console.error('打开语音交互演示失败:', err);
+          // 备用方案：直接跳转
+          window.open('http://localhost:1420/voice-interaction', '_blank');
+        }
+      }
+    },
+    {
       id: 'debug',
       label: debugMode ? '关闭调试模式' : '开启调试模式',
       action: () => {
         setDebugMode(!debugMode);
         console.log(`调试模式已${debugMode ? '关闭' : '开启'}`);
       }
+    },
+    {
+      type: 'separator' as const
+    },
+    {
+      id: 'edge-detection-info',
+      label: '📏 边缘检测信息',
+      children: [
+        {
+          id: 'refresh-constraints',
+          label: '🔄 刷新约束',
+          action: async () => {
+            try {
+              await refreshScreenInfo();
+              console.log('✅ 约束已刷新');
+            } catch (err) {
+              console.error('❌ 刷新约束失败:', err);
+            }
+          }
+        },
+        {
+          id: 'check-edges',
+          label: '📍 检查边缘距离',
+          action: async () => {
+            try {
+              const distances = await getDistanceToEdges();
+              const nearEdge = await isNearEdge(50);
+              console.log('📍 边缘距离信息:', { distances, nearEdge });
+            } catch (err) {
+              console.error('❌ 检查边缘失败:', err);
+            }
+          }
+        },
+        {
+          id: 'constraint-status',
+          label: constraints ? '✅ 约束已启用' : '❌ 约束未初始化',
+          action: () => {
+            console.log('🔧 约束状态:', {
+              initialized: edgeDetectionInitialized,
+              hasConstraints: !!constraints,
+              error: edgeDetectionError,
+              constraints: constraints,
+            });
+          }
+        }
+      ]
     },
     {
       type: 'separator' as const
@@ -739,6 +1037,6 @@ export const Live2DWindow: React.FC = () => {
         onClose={closeContextMenu}
         menuItems={menuItems}
       />
-    </div>
+      </div>
   );
 };

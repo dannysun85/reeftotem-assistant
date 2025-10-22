@@ -1,12 +1,12 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "reeftotem-assistant",
-  "version": "0.1.0",
+  "version": "0.2.0-alpha",
   "identifier": "com.sun.reeftotem-assistant",
   "build": {
     "beforeDevCommand": "pnpm dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "pnpm build",
+    "beforeBuildCommand": "pnpm build && cp live2d-window.html dist/",
     "frontendDist": "../dist"
   },
   "app": {
@@ -15,8 +15,8 @@
         "label": "main",
         "title": "reeftotem-assistant",
         "url": "/",
-        "width": 900,
-        "height": 700,
+        "width": 1300,
+        "height": 750,
         "minWidth": 600,
         "minHeight": 400,
         "center": true,
@@ -61,6 +61,10 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
+    ],
+    "resources": [
+      "icons/*",
+      "../dist/assets/**/*"
     ]
   }
 }

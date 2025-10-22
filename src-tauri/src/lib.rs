@@ -8,8 +8,17 @@ use tauri::{
     image::Image,
     menu::{MenuBuilder, MenuItem, PredefinedMenuItem, Submenu},
     tray::{TrayIcon, TrayIconBuilder},
-    AppHandle, Manager,
+    AppHandle, Manager, Emitter,
 };
+use chrono;
+
+// 导入腾讯云语音服务模块
+mod tencent_cloud;
+use tencent_cloud::TencentCloudVoiceService;
+
+// 导入连接测试模块
+mod connection_tester;
+
 
 // 应用状态，用于保持托盘图标存活
 pub struct AppState {
@@ -363,6 +372,427 @@ fn greet(name: &str) -> String {
     format!("Hello, {}! You've been greeted from Rust!", name)
 }
 
+// 测试命令
+#[tauri::command]
+fn test_invoke() -> Result<String, String> {
+    println!("🧪 测试 invoke 命令被调用");
+    Ok("Tauri invoke 测试成功!".to_string())
+}
+
+// 腾讯云语音服务命令
+#[tauri::command]
+async fn tencent_asr(
+    config: TencentASRConfig,
+    audio_data: Vec<u8>,
+) -> Result<ASRResult, String> {
+    println!("🎙️ 腾讯云ASR调用 - 音频数据大小: {} bytes", audio_data.len());
+
+    // 创建腾讯云语音服务实例
+    let tencent_config = tencent_cloud::TencentCloudConfig {
+        secret_id: config.secret_id,
+        secret_key: config.secret_key,
+        region: config.region,
+        app_id: config.app_id,
+    };
+
+    let voice_service = TencentCloudVoiceService::new(tencent_config);
+
+    // 调用真实的腾讯云ASR API
+    match voice_service.recognize_speech(&audio_data, &config.engine_model_type).await {
+        Ok(text) => {
+            println!("✅ ASR识别成功: {}", text);
+            Ok(ASRResult {
+                text: text.clone(),
+                confidence: 0.95, // 腾讯云ASR通常提供置信度，这里先使用固定值
+                start_time: 0,
+                end_time: 0,
+                words: vec![],
+            })
+        }
+        Err(e) => {
+            println!("❌ ASR识别失败: {}", e);
+            Err(e)
+        }
+    }
+}
+
+#[tauri::command]
+async fn tencent_tts(
+    config: TencentTTSConfig,
+    text: String,
+) -> Result<TTSResult, String> {
+    println!("🔊 腾讯云TTS调用 - 文本: {}", text);
+
+    // 创建腾讯云语音服务实例
+    let tencent_config = tencent_cloud::TencentCloudConfig {
+        secret_id: config.secret_id,
+        secret_key: config.secret_key,
+        region: config.region,
+        app_id: config.app_id,
+    };
+
+    let voice_service = TencentCloudVoiceService::new(tencent_config);
+
+    // 调用真实的腾讯云TTS API
+    match voice_service
+        .synthesize_speech(
+            &text,
+            config.voice_type,
+            config.volume,
+            config.speed,
+            config.pitch,
+            config.sample_rate,
+        )
+        .await
+    {
+        Ok(audio_bytes) => {
+            println!("✅ TTS合成成功，音频大小: {} bytes", audio_bytes.len());
+            Ok(TTSResult {
+                audio_data: audio_bytes.clone(),
+                text: text,
+                duration: (audio_bytes.len() / (config.sample_rate as usize * 2)) as u32 * 1000, // 简单估算
+                voice_type: config.voice_type,
+                sample_rate: config.sample_rate,
+                timestamp: chrono::Utc::now().timestamp(),
+            })
+        }
+        Err(e) => {
+            println!("❌ TTS合成失败: {}", e);
+            Err(e)
+        }
+    }
+}
+
+// 腾讯云服务配置接口
+#[derive(serde::Deserialize)]
+pub struct TencentASRConfig {
+    pub secret_id: String,
+    pub secret_key: String,
+    pub region: String,
+    pub app_id: String,
+    pub engine_model_type: String,
+    pub channel_num: u8,
+    pub sample_rate: u32,
+}
+
+#[derive(serde::Deserialize)]
+pub struct TencentTTSConfig {
+    pub secret_id: String,
+    pub secret_key: String,
+    pub region: String,
+    pub app_id: String,
+    pub voice_type: i32,
+    pub volume: f32,
+    pub speed: f32,
+    pub pitch: f32,
+    pub sample_rate: u32,
+}
+
+// 语音识别结果
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct ASRResult {
+    pub text: String,
+    pub confidence: f64,
+    pub start_time: u32,
+    pub end_time: u32,
+    pub words: Vec<WordDetail>,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct WordDetail {
+    pub word: String,
+    pub start_time: u32,
+    pub end_time: u32,
+    pub confidence: f64,
+}
+
+// 语音合成结果
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct TTSResult {
+    pub audio_data: Vec<u8>,
+    pub text: String,
+    pub duration: u32,
+    pub voice_type: i32,
+    pub sample_rate: u32,
+    pub timestamp: i64,
+}
+
+// Screen edge detection module
+mod screen_edge_detection {
+    use super::*;
+    use serde::{Deserialize, Serialize};
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub struct ScreenBounds {
+        pub x: i32,
+        pub y: i32,
+        pub width: u32,
+        pub height: u32,
+    }
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub struct WindowBounds {
+        pub x: i32,
+        pub y: i32,
+        pub width: u32,
+        pub height: u32,
+    }
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub struct DragConstraints {
+        pub min_x: i32,
+        pub min_y: i32,
+        pub max_x: i32,
+        pub max_y: i32,
+        pub screen_bounds: ScreenBounds,
+    }
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub struct ConstrainedPosition {
+        pub x: i32,
+        pub y: i32,
+        pub is_constrained: bool,
+        pub constraint_edge: Option<String>, // "left", "right", "top", "bottom"
+    }
+
+    /// 获取当前窗口所在的屏幕边界信息
+    pub fn get_screen_bounds<R: tauri::Runtime>(
+        app: &AppHandle<R>,
+    ) -> Result<ScreenBounds, String> {
+        if let Some(window) = app.get_webview_window("live2d") {
+            let monitor = window
+                .current_monitor()
+                .map_err(|e| format!("获取显示器失败: {}", e))?
+                .ok_or("无法获取当前显示器信息")?;
+
+            let position = monitor.position();
+            let size = monitor.size();
+
+            Ok(ScreenBounds {
+                x: position.x,
+                y: position.y,
+                width: size.width,
+                height: size.height,
+            })
+        } else {
+            Err("无法找到Live2D窗口".to_string())
+        }
+    }
+
+    /// 获取窗口当前边界信息
+    pub fn get_window_bounds<R: tauri::Runtime>(
+        app: &AppHandle<R>,
+    ) -> Result<WindowBounds, String> {
+        if let Some(window) = app.get_webview_window("live2d") {
+            let position = window
+                .outer_position()
+                .map_err(|e| format!("获取窗口位置失败: {}", e))?;
+            let size = window
+                .inner_size()
+                .map_err(|e| format!("获取窗口尺寸失败: {}", e))?;
+
+            Ok(WindowBounds {
+                x: position.x,
+                y: position.y,
+                width: size.width,
+                height: size.height,
+            })
+        } else {
+            Err("无法找到Live2D窗口".to_string())
+        }
+    }
+
+    /// 计算窗口拖拽的安全边界
+    pub fn calculate_drag_constraints(
+        screen_bounds: &ScreenBounds,
+        window_bounds: &WindowBounds,
+        margin: i32, // 边缘缓冲距离
+    ) -> DragConstraints {
+        let min_x = screen_bounds.x + margin;
+        let min_y = screen_bounds.y + margin;
+        let max_x = screen_bounds.x + screen_bounds.width as i32 - window_bounds.width as i32 - margin;
+        let max_y = screen_bounds.y + screen_bounds.height as i32 - window_bounds.height as i32 - margin;
+
+        DragConstraints {
+            min_x,
+            min_y,
+            max_x,
+            max_y,
+            screen_bounds: screen_bounds.clone(),
+        }
+    }
+
+    /// 约束位置到安全区域内
+    pub fn constrain_position(
+        x: i32,
+        y: i32,
+        constraints: &DragConstraints,
+    ) -> ConstrainedPosition {
+        let mut constrained_x = x;
+        let mut constrained_y = y;
+        let mut constraint_edge = None;
+        let mut is_constrained = false;
+
+        // 约束X坐标
+        if x < constraints.min_x {
+            constrained_x = constraints.min_x;
+            constraint_edge = Some("left".to_string());
+            is_constrained = true;
+        } else if x > constraints.max_x {
+            constrained_x = constraints.max_x;
+            constraint_edge = Some("right".to_string());
+            is_constrained = true;
+        }
+
+        // 约束Y坐标
+        if y < constraints.min_y {
+            constrained_y = constraints.min_y;
+            if constraint_edge.is_none() {
+                constraint_edge = Some("top".to_string());
+            } else {
+                // 角落情况
+                constraint_edge = Some(format!("{}-top", constraint_edge.unwrap()));
+            }
+            is_constrained = true;
+        } else if y > constraints.max_y {
+            constrained_y = constraints.max_y;
+            if constraint_edge.is_none() {
+                constraint_edge = Some("bottom".to_string());
+            } else {
+                // 角落情况
+                constraint_edge = Some(format!("{}-bottom", constraint_edge.unwrap()));
+            }
+            is_constrained = true;
+        }
+
+        ConstrainedPosition {
+            x: constrained_x,
+            y: constrained_y,
+            is_constrained,
+            constraint_edge,
+        }
+    }
+
+    /// 预测移动后是否会超出边界
+    pub fn predict_boundary_collision(
+        current_x: i32,
+        current_y: i32,
+        delta_x: i32,
+        delta_y: i32,
+        constraints: &DragConstraints,
+    ) -> (bool, Option<String>) {
+        let future_x = current_x + delta_x;
+        let future_y = current_y + delta_y;
+
+        let will_collide_x = future_x < constraints.min_x || future_x > constraints.max_x;
+        let will_collide_y = future_y < constraints.min_y || future_y > constraints.max_y;
+
+        if will_collide_x && will_collide_y {
+            (true, Some("corner".to_string()))
+        } else if will_collide_x {
+            let edge = if future_x < constraints.min_x { "left" } else { "right" };
+            (true, Some(edge.to_string()))
+        } else if will_collide_y {
+            let edge = if future_y < constraints.min_y { "top" } else { "bottom" };
+            (true, Some(edge.to_string()))
+        } else {
+            (false, None)
+        }
+    }
+}
+
+// 导出屏幕边缘检测相关的Tauri命令
+
+#[tauri::command]
+async fn get_screen_bounds(app: AppHandle) -> Result<screen_edge_detection::ScreenBounds, String> {
+    screen_edge_detection::get_screen_bounds(&app)
+}
+
+#[tauri::command]
+async fn get_window_bounds(app: AppHandle) -> Result<screen_edge_detection::WindowBounds, String> {
+    screen_edge_detection::get_window_bounds(&app)
+}
+
+#[tauri::command]
+async fn calculate_drag_constraints(
+    app: AppHandle,
+    margin: Option<i32>,
+) -> Result<screen_edge_detection::DragConstraints, String> {
+    let screen_bounds = screen_edge_detection::get_screen_bounds(&app)?;
+    let window_bounds = screen_edge_detection::get_window_bounds(&app)?;
+    let margin = margin.unwrap_or(10); // 默认10像素边距
+    Ok(screen_edge_detection::calculate_drag_constraints(
+        &screen_bounds,
+        &window_bounds,
+        margin,
+    ))
+}
+
+#[tauri::command]
+async fn constrain_window_position(
+    app: AppHandle,
+    x: i32,
+    y: i32,
+    margin: Option<i32>,
+) -> Result<screen_edge_detection::ConstrainedPosition, String> {
+    let screen_bounds = screen_edge_detection::get_screen_bounds(&app)?;
+    let window_bounds = screen_edge_detection::get_window_bounds(&app)?;
+    let margin = margin.unwrap_or(10);
+    let constraints = screen_edge_detection::calculate_drag_constraints(
+        &screen_bounds,
+        &window_bounds,
+        margin,
+    );
+    Ok(screen_edge_detection::constrain_position(x, y, &constraints))
+}
+
+#[tauri::command]
+async fn predict_boundary_collision(
+    app: AppHandle,
+    delta_x: i32,
+    delta_y: i32,
+    margin: Option<i32>,
+) -> Result<(bool, Option<String>), String> {
+    let screen_bounds = screen_edge_detection::get_screen_bounds(&app)?;
+    let window_bounds = screen_edge_detection::get_window_bounds(&app)?;
+    let margin = margin.unwrap_or(10);
+    let constraints = screen_edge_detection::calculate_drag_constraints(
+        &screen_bounds,
+        &window_bounds,
+        margin,
+    );
+    Ok(screen_edge_detection::predict_boundary_collision(
+        window_bounds.x,
+        window_bounds.y,
+        delta_x,
+        delta_y,
+        &constraints,
+    ))
+}
+
+#[tauri::command]
+async fn set_constrained_window_position(
+    app: AppHandle,
+    x: i32,
+    y: i32,
+    margin: Option<i32>,
+) -> Result<screen_edge_detection::ConstrainedPosition, String> {
+    let app_clone = app.clone();
+    let constrained_pos = constrain_window_position(app_clone, x, y, margin).await?;
+
+    // 应用约束后的位置到窗口
+    if let Some(window) = app.get_webview_window("live2d") {
+        window
+            .set_position(tauri::Position::Physical(tauri::PhysicalPosition {
+                x: constrained_pos.x,
+                y: constrained_pos.y,
+            }))
+            .map_err(|e| format!("设置窗口位置失败: {}", e))?;
+    }
+
+    Ok(constrained_pos)
+}
+
 #[tauri::command]
 async fn trigger_show_animation(app: AppHandle) -> Result<(), String> {
     event_emitter::emit_show_animation(app).await
@@ -561,6 +991,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
             greet,
+            test_invoke,
             trigger_show_animation,
             switch_persona,
             show_live2d_window,
@@ -579,10 +1010,28 @@ pub fn run() {
             toggle_always_on_top,
             reset_window_position,
             debug_right_click_menu,
+            // 新增的屏幕边缘检测命令
+            get_screen_bounds,
+            get_window_bounds,
+            calculate_drag_constraints,
+            constrain_window_position,
+            predict_boundary_collision,
+            set_constrained_window_position,
+            // 腾讯云语音服务命令
+            tencent_asr,
+            tencent_tts,
+            // Live2D语音交互命令
+            trigger_live2d_expression,
+            trigger_live2d_lip_sync,
+            trigger_live2d_motion,
+            // 连接测试命令 (暂时注释)
+            // run_connection_test,
+            // run_system_diagnosis,
         ])
         .setup(|app| {
             println!("🚀 Tauri应用启动");
 
+    
             // 创建应用状态
             let app_state = AppState {
                 tray_icon: Arc::new(Mutex::new(None)),
@@ -698,33 +1147,123 @@ fn setup_tray(
 
 /// 创建托盘图标数据
 fn create_tray_icon_data() -> Result<Image<'static>, Box<dyn std::error::Error>> {
-    // 尝试从文件加载白色logo作为托盘图标
-    let icon_path = "./icons/tray_white_32.png";
+    println!("🔍 开始加载托盘图标...");
 
-    match fs::read(icon_path) {
-        Ok(icon_data) => {
-            // 尝试解码PNG图片
-            match image::load_from_memory(&icon_data) {
+    // 1. 首先尝试从文件系统加载（开发环境）
+    let possible_paths = vec![
+        "icons/tray_white_32.png",
+        "icons/32x32.png",
+        "icons/128x128.png",
+        "icons/icon.png",
+    ];
+
+    for icon_path in possible_paths {
+        println!("🔍 尝试加载托盘图标: {}", icon_path);
+
+        match fs::read(&icon_path) {
+            Ok(icon_data) => {
+                println!("✅ 成功读取文件: {}, 大小: {} bytes", icon_path, icon_data.len());
+
+                // 尝试解码图片
+                match image::load_from_memory(&icon_data) {
+                    Ok(img) => {
+                        // 转换为RGBA格式
+                        let rgba_img = img.to_rgba8();
+                        let (width, height) = rgba_img.dimensions();
+                        let rgba = rgba_img.into_raw();
+
+                        println!("✅ 成功加载托盘图标: {}x{} 像素 (路径: {})", width, height, icon_path);
+                        return Ok(Image::new_owned(rgba, width, height));
+                    }
+                    Err(e) => {
+                        eprintln!("❌ 图片解码失败: {} (路径: {}), 尝试下一个路径", e, icon_path);
+                        continue;
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!("❌ 无法读取托盘图标文件: {} (路径: {}), 尝试下一个路径", e, icon_path);
+                continue;
+            }
+        }
+    }
+
+    // 3. 如果文件系统加载失败，尝试使用嵌入的图标
+    println!("⚠️ 文件系统加载失败，尝试使用嵌入的图标");
+    if let Ok(icon_data) = get_embedded_icon() {
+        println!("✅ 使用嵌入的托盘图标");
+        return Ok(icon_data);
+    }
+
+    // 4. 如果所有方法都失败，使用内置的备用图标
+    eprintln!("❌ 所有托盘图标路径都失败，使用内置备用图标");
+    create_fallback_tray_icon()
+}
+
+/// 获取嵌入的图标数据
+fn get_embedded_icon() -> Result<Image<'static>, Box<dyn std::error::Error>> {
+    // 尝试嵌入托盘图标文件
+    let icon_paths: &[(&str, &[u8])] = &[
+        ("icons/tray_white_32.png", include_bytes!("../icons/tray_white_32.png")),
+        ("icons/32x32.png", include_bytes!("../icons/32x32.png")),
+        ("icons/128x128.png", include_bytes!("../icons/128x128.png")),
+        ("icons/icon.png", include_bytes!("../icons/icon.png")),
+    ];
+
+    for (path, data) in icon_paths.iter() {
+        if data.len() > 0 {
+            println!("✅ 使用嵌入的托盘图标: {}", path);
+
+            // 尝试解码图片
+            match image::load_from_memory(data) {
                 Ok(img) => {
-                    // 转换为RGBA格式
                     let rgba_img = img.to_rgba8();
                     let (width, height) = rgba_img.dimensions();
                     let rgba = rgba_img.into_raw();
-
-                    println!("✅ 成功加载托盘图标: {}x{} 像素", width, height);
-                    Ok(Image::new_owned(rgba, width, height))
+                    return Ok(Image::new_owned(rgba, width, height));
                 }
                 Err(e) => {
-                    eprintln!("❌ 图片解码失败: {}, 使用备用图标", e);
-                    create_fallback_tray_icon()
+                    eprintln!("❌ 嵌入图标解码失败: {} (路径: {}), 尝试下一个", e, path);
+                    continue;
                 }
             }
         }
-        Err(e) => {
-            eprintln!("❌ 无法读取托盘图标文件: {}, 使用备用图标", e);
-            create_fallback_tray_icon()
+    }
+
+    // 如果所有嵌入图标都失败，使用代码生成的备用图标
+    println!("⚠️ 所有嵌入图标都失败，使用代码生成的备用图标");
+    Err(From::from("无法加载嵌入图标"))
+}
+
+/// 创建托盘图标像素数据
+fn create_tray_icon_pixels() -> Vec<u8> {
+    let mut rgba = Vec::with_capacity(32 * 32 * 4);
+
+    for y in 0..32 {
+        for x in 0..32 {
+            let center_x = 16.0;
+            let center_y = 16.0;
+            let dx = x as f32 - center_x;
+            let dy = y as f32 - center_y;
+            let distance = (dx * dx + dy * dy).sqrt();
+
+            if distance < 14.0 {
+                // 主要圆形 - 明亮的白色
+                rgba.push(255); // R
+                rgba.push(255); // G
+                rgba.push(255); // B
+                rgba.push(255); // A
+            } else {
+                // 完全透明的背景
+                rgba.push(0);   // R
+                rgba.push(0);   // G
+                rgba.push(0);   // B
+                rgba.push(0);   // A
+            }
         }
     }
+
+    rgba
 }
 
 /// 创建备用托盘图标（简单的白色圆形）
@@ -748,6 +1287,66 @@ fn create_fallback_tray_icon() -> Result<Image<'static>, Box<dyn std::error::Err
 
     println!("✅ 使用备用托盘图标");
     Ok(Image::new_owned(rgba, 16, 16))
+}
+
+// ========== Live2D语音交互命令 ==========
+
+#[tauri::command]
+async fn trigger_live2d_expression(app: AppHandle, expression: String) -> Result<(), String> {
+    println!("🎭 触发Live2D表情: {}", expression);
+
+    // 发送表情事件到Live2D窗口
+    if let Some(window) = app.get_webview_window("live2d") {
+        let payload = serde_json::json!({
+            "type": "expression",
+            "expression": expression,
+            "timestamp": chrono::Utc::now().timestamp()
+        });
+
+        window.emit("live2d_expression", &payload)
+            .map_err(|e| format!("发送表情事件失败: {}", e))?;
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+async fn trigger_live2d_lip_sync(app: AppHandle, text: String, lip_sync_data: serde_json::Value) -> Result<(), String> {
+    println!("🗣️ 触发Live2D口型同步: {}", text);
+
+    // 发送口型同步数据到Live2D窗口
+    if let Some(window) = app.get_webview_window("live2d") {
+        let payload = serde_json::json!({
+            "type": "lip_sync",
+            "text": text,
+            "data": lip_sync_data,
+            "timestamp": chrono::Utc::now().timestamp()
+        });
+
+        window.emit("live2d_lip_sync", &payload)
+            .map_err(|e| format!("发送口型同步事件失败: {}", e))?;
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+async fn trigger_live2d_motion(app: AppHandle, motion: String) -> Result<(), String> {
+    println!("🎬 触发Live2D动作: {}", motion);
+
+    // 发送动作事件到Live2D窗口
+    if let Some(window) = app.get_webview_window("live2d") {
+        let payload = serde_json::json!({
+            "type": "motion",
+            "motion": motion,
+            "timestamp": chrono::Utc::now().timestamp()
+        });
+
+        window.emit("live2d_motion", &payload)
+            .map_err(|e| format!("发送动作事件失败: {}", e))?;
+    }
+
+    Ok(())
 }
 
 // 添加chrono依赖到Cargo.toml

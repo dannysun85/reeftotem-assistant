@@ -3,6 +3,8 @@
  * 解决模型加载失败和时序问题
  */
 
+import { getLive2DCorePath, getLive2DAssetPath, getEnvironmentInfo } from './tauriPathUtils';
+
 console.log('🔧 模型加载修复工具加载...');
 
 /**
@@ -47,10 +49,14 @@ function waitForModelLoad(): Promise<boolean> {
 function checkModelFiles(): void {
     console.log('🔍 检查模型文件可访问性...');
 
+    console.log('🔧 环境信息:', getEnvironmentInfo());
+
+    // 使用统一的路径处理函数
+    const corePath = getLive2DCorePath();
     const modelPaths = [
-        '/src/lib/live2d/Core/live2dcubismcore.js',
-        '/assets/live2d/characters/free/HaruGreeter/HaruGreeter.model3.json',
-        '/assets/live2d/characters/free/HaruGreeter/Haru.moc3'
+        corePath,
+        getLive2DAssetPath('characters/free/HaruGreeter/HaruGreeter.model3.json'),
+        getLive2DAssetPath('characters/free/HaruGreeter/Haru.moc3')
     ];
 
     modelPaths.forEach((path, index) => {

@@ -9,6 +9,9 @@ import "./tauri-shim";
 // 导入LAppDelegate用于测试
 import { LAppDelegate } from "./lib/live2d/src/lappdelegate";
 
+// 导入路径工具
+import { getLive2DCorePath } from "./utils/tauriPathUtils";
+
 // 预加载Live2D Core WebAssembly模块
 async function loadLive2DCore(): Promise<void> {
     try {
@@ -17,9 +20,13 @@ async function loadLive2DCore(): Promise<void> {
             return;
         }
 
-        // 动态加载Live2D Core - 使用非模块方式
+        // 动态加载Live2D Core - 使用统一的资源路径
         const coreScript = document.createElement('script');
-        coreScript.src = '/src/lib/live2d/Core/live2dcubismcore.js';
+
+        // 使用统一的路径处理函数
+        const corePath = getLive2DCorePath();
+
+        coreScript.src = corePath;
         coreScript.type = 'text/javascript';
         coreScript.async = false; // 同步加载确保顺序
 
@@ -30,21 +37,13 @@ async function loadLive2DCore(): Promise<void> {
                     if ((window as any).Live2DCubismCore) {
                         resolve();
                     } else {
-                        // 尝试加载min版本
-                        const minScript = document.createElement('script');
-                        minScript.src = '/src/lib/live2d/Core/live2dcubismcore.min.js';
-                        minScript.type = 'text/javascript';
-                        minScript.onload = () => {
-                            resolve();
-                        };
-                        minScript.onerror = (error) => {
-                            reject(error);
-                        };
-                        document.head.appendChild(minScript);
+                        console.error('Live2DCubismCore not found after loading script');
+                        reject(new Error('Live2DCubismCore not available'));
                     }
                 }, 100);
             };
             coreScript.onerror = (error) => {
+                console.error('Failed to load Live2D Core from:', corePath);
                 reject(error);
             };
             document.head.appendChild(coreScript);

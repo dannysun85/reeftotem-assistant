@@ -1,5 +1,6 @@
 /* @refresh skip */
 import { useCallback } from 'react';
+import { getLive2DModelPath } from '../../utils/tauriPathUtils';
 
 export const useLive2DInit = (loadLive2DCore) => {
   const initializeLive2D = useCallback(async (canvasRef, setStatus, setError, setIsLoaded, initialPersona = null) => {
@@ -52,7 +53,7 @@ export const useLive2DInit = (loadLive2DCore) => {
             resource_id: 'default',
             name: initialPersona,
             type: 'CHARACTER',
-            link: `/assets/live2d/characters/free/${initialPersona}/${initialPersona}.model3.json`
+            link: getLive2DModelPath(initialPersona)
           };
           console.log('角色模型配置:', characterModel);
 

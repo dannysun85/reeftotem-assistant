@@ -11,14 +11,12 @@ const host = process.env.TAURI_DEV_HOST;
  * 我们使用 Vite 内置的 esbuild 来处理 JSX，而不是使用 React 插件。
  * 这意味着没有 React Fast Refresh，但可以避免复杂组件的编译错误。
  */
+import react from '@vitejs/plugin-react';
+
 export default defineConfig(async () => ({
-  plugins: [],
-  
-  // 使用 esbuild 处理 JSX
-  esbuild: {
-    jsxInject: `import React from 'react'`,
-  },
-  
+  plugins: [react()],
+
+
   resolve: {
     alias: {
       "@": resolve(__dirname, "./src"),

@@ -5,6 +5,7 @@
 import { LAppDelegate } from './src/lappdelegate';
 import type { ResourceModel } from './src/lappdelegate';
 import { Live2DConfig } from './types';
+import * as LAppDefine from './src/lappdefine';
 
 export interface ILive2DManager {
     initialize(config: Live2DConfig): Promise<boolean>;
@@ -58,7 +59,9 @@ export class Live2DManager implements ILive2DManager {
         this._config = config;
 
         try {
-            console.log('Initializing Live2D with config:', config);
+            if (LAppDefine.DebugLogEnable) {
+                console.log('Initializing Live2D with config:', config);
+            }
 
             // 初始化音频上下文
             if (this._audioContext.state === 'suspended') {
@@ -66,18 +69,16 @@ export class Live2DManager implements ILive2DManager {
             }
 
             // 初始化Live2D框架
-            console.log('Live2DManager: 获取LAppDelegate实例');
+            // 等待Live2D依赖加载完成
+            await this.waitForLive2DDependencies();
+
             this._lAppDelegate = LAppDelegate.getInstance();
-            console.log('Live2DManager: 开始初始化LAppDelegate');
             const success = this._lAppDelegate.initialize();
 
             if (success) {
-                console.log('Live2DManager: LAppDelegate初始化成功，异步启动渲染循环');
                 // 异步启动渲染循环，避免阻塞initialize方法
                 setTimeout(() => {
-                    console.log('Live2DManager: 开始运行渲染循环');
                     this._lAppDelegate!.run();
-                    console.log('Live2D framework initialized successfully');
                 }, 0);
             } else {
                 console.error('Live2DManager: LAppDelegate初始化失败');
@@ -88,6 +89,44 @@ export class Live2DManager implements ILive2DManager {
             console.error('Live2D initialization failed:', error);
             return false;
         }
+    }
+
+    /**
+     * 等待Live2D依赖加载完成
+     */
+    private async waitForLive2DDependencies(): Promise<void> {
+        const maxWaitTime = 10000; // 最多等待10秒
+        const checkInterval = 100; // 每100ms检查一次
+        let waitTime = 0;
+
+        while (waitTime < maxWaitTime) {
+            // 检查Live2D Core
+            if (!(window as any).Live2DCubismCore) {
+                await new Promise(resolve => setTimeout(resolve, checkInterval));
+                waitTime += checkInterval;
+                continue;
+            }
+
+            // 检查PIXI.js
+            if (!(window as any).PIXI) {
+                await new Promise(resolve => setTimeout(resolve, checkInterval));
+                waitTime += checkInterval;
+                continue;
+            }
+
+            // 检查LAppDelegate是否可用（通过全局变量或类检查）
+            const hasLAppDelegate = !!(window as any).LAppDelegate || typeof LAppDelegate !== 'undefined';
+            if (!hasLAppDelegate) {
+                await new Promise(resolve => setTimeout(resolve, checkInterval));
+                waitTime += checkInterval;
+                continue;
+            }
+
+            return;
+        }
+
+        // 如果等待超时，抛出错误
+        throw new Error(`Live2D依赖加载超时 (${maxWaitTime}ms)`);
     }
 
     /**
@@ -112,7 +151,9 @@ export class Live2DManager implements ILive2DManager {
 
         if (character && this._lAppDelegate) {
             this._lAppDelegate.changeCharacter(character);
-            console.log('Changed character to:', character.name);
+            if (LAppDefine.DebugLogEnable) {
+                console.log('Changed character to:', character.name);
+            }
         }
 
         // 检查就绪状态
@@ -226,7 +267,9 @@ export class Live2DManager implements ILive2DManager {
                 const subdelegate = this._lAppDelegate.getSubdelegate().at(0);
                 if (subdelegate && subdelegate.getLive2DManager()._models.getSize() > 0) {
                     this._ready = true;
-                    console.log('Live2D is ready');
+                    if (LAppDefine.DebugLogEnable) {
+                        console.log('Live2D is ready');
+                    }
                     return;
                 }
             }

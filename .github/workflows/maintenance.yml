@@ -1,0 +1,407 @@
+name: Maintenance Tasks
+
+on:
+  schedule:
+    # 每周一早上 9 点运行维护任务
+    - cron: '0 9 * * 1'
+    # 每月1号早上 9 点运行月度维护
+    - cron: '0 9 1 * *'
+  workflow_dispatch:
+    inputs:
+      task:
+        description: 'Choose maintenance task'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - cleanup
+          - updates
+          - metrics
+          - backup
+
+jobs:
+  # 清理任务
+  cleanup:
+    name: Cleanup Tasks
+    runs-on: ubuntu-latest
+    if: github.event.inputs.task == 'all' || github.event.inputs.task == 'cleanup' || github.event.inputs.task == ''
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Cleanup old artifacts
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const artifacts = await github.rest.actions.listWorkflowRunArtifacts({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: context.runId,
+            });
+
+            // 删除超过 30 天的 artifacts
+            const thirtyDaysAgo = new Date();
+            thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+            for (const artifact of artifacts.data.artifacts) {
+              const createdDate = new Date(artifact.created_at);
+              if (createdDate < thirtyDaysAgo) {
+                await github.rest.actions.deleteArtifact({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  artifact_id: artifact.id,
+                });
+                console.log(`Deleted artifact: ${artifact.name}`);
+              }
+            }
+
+      - name: Cleanup old workflow runs
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const runs = await github.rest.actions.listWorkflowRunsForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              per_page: 100,
+            });
+
+            // 删除超过 60 天的 workflow runs
+            const sixtyDaysAgo = new Date();
+            sixtyDaysAgo.setDate(sixtyDaysAgo.getDate() - 60);
+
+            for (const run of runs.data.workflow_runs) {
+              const createdDate = new Date(run.created_at);
+              if (createdDate < sixtyDaysAgo && run.status === 'completed') {
+                await github.rest.actions.deleteWorkflowRun({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  run_id: run.id,
+                });
+                console.log(`Deleted workflow run: ${run.name}`);
+              }
+            }
+
+      - name: Cleanup stale branches
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const branches = await github.rest.repos.listBranches({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              protected: false,
+            });
+
+            for (const branch of branches.data) {
+              // 检查分支是否超过 90 天没有更新
+              const commits = await github.rest.repos.listCommits({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                sha: branch.name,
+                per_page: 1,
+              });
+
+              if (commits.data.length > 0) {
+                const lastCommitDate = new Date(commits.data[0].commit.author.date);
+                const ninetyDaysAgo = new Date();
+                ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
+
+                if (lastCommitDate < ninetyDaysAgo && !branch.protected) {
+                  try {
+                    await github.rest.repos.deleteBranch({
+                      owner: context.repo.owner,
+                      repo: context.repo.repo,
+                      branch: branch.name,
+                    });
+                    console.log(`Deleted stale branch: ${branch.name}`);
+                  } catch (error) {
+                    console.log(`Could not delete branch ${branch.name}: ${error.message}`);
+                  }
+                }
+              }
+            }
+
+  # 依赖更新检查
+  updates:
+    name: Dependency Updates
+    runs-on: ubuntu-latest
+    if: github.event.inputs.task == 'all' || github.event.inputs.task == 'updates' || github.event.inputs.task == ''
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 8
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Check for outdated Node.js dependencies
+        id: outdated
+        run: |
+          pnpm outdated --format=json > outdated.json || true
+          echo "has_updates=$(jq '. | length > 0' outdated.json)" >> $GITHUB_OUTPUT
+
+      - name: Create Pull Request for Node.js updates
+        if: steps.outdated.outputs.has_updates == 'true'
+        uses: peter-evans/create-pull-request@v5
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: 'chore: update Node.js dependencies'
+          title: 'chore: update Node.js dependencies'
+          body: |
+            ## 📦 Node.js Dependencies Update
+
+            This PR updates outdated Node.js dependencies automatically.
+
+            ### 📋 Changes
+            - Updates major/minor/patch dependencies as needed
+            - Maintains compatibility with current codebase
+            - Includes security updates where applicable
+
+            ### ⚠️ Please Review
+            - Test all functionality thoroughly
+            - Check for breaking changes
+            - Verify API compatibility
+
+            ---
+            *Created by automated dependency update workflow*
+          branch: chore/update-nodejs-dependencies
+          delete-branch: true
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Check for outdated Rust dependencies
+        id: outdated-rust
+        run: |
+          cd src-tauri
+          cargo update --dry-run > ../outdated-rust.txt 2>&1 || true
+          if [ -s ../outdated-rust.txt ] && grep -q "Updating" ../outdated-rust.txt; then
+            echo "has_updates=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_updates=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create Pull Request for Rust updates
+        if: steps.outdated-rust.outputs.has_updates == 'true'
+        uses: peter-evans/create-pull-request@v5
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: 'chore: update Rust dependencies'
+          title: 'chore: update Rust dependencies'
+          body: |
+            ## 📦 Rust Dependencies Update
+
+            This PR updates outdated Rust dependencies automatically.
+
+            ### 📋 Changes
+            - Updates Cargo dependencies
+            - Maintains API compatibility
+            - Includes security patches
+
+            ### ⚠️ Please Review
+            - Run `cargo test` to verify tests pass
+            - Check for breaking changes in APIs
+            - Verify build succeeds
+
+            ---
+            *Created by automated dependency update workflow*
+          branch: chore/update-rust-dependencies
+          delete-branch: true
+
+  # 项目指标收集
+  metrics:
+    name: Project Metrics
+    runs-on: ubuntu-latest
+    if: github.event.inputs.task == 'all' || github.event.inputs.task == 'metrics' || github.event.inputs.task == ''
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Generate project metrics
+        id: metrics
+        run: |
+          # 代码统计
+          echo "## 📊 Project Metrics" > metrics.md
+          echo "| Metric | Value |" >> metrics.md
+          echo "|--------|-------|" >> metrics.md
+          echo "| Total files | $(find . -type f ! -path './node_modules/*' ! -path './target/*' ! -path './.git/*' | wc -l) |" >> metrics.md
+          echo "| TypeScript files | $(find . -name "*.ts" -o -name "*.tsx" ! -path './node_modules/*' | wc -l) |" >> metrics.md
+          echo "| Rust files | $(find . -name "*.rs" ! -path './target/*' | wc -l) |" >> metrics.md
+          echo "| Markdown files | $(find . -name "*.md" ! -path './node_modules/*' | wc -l) |" >> metrics.md
+          echo "| Total lines of code | $(find . -name "*.ts" -o -name "*.tsx" -o -name "*.rs" ! -path './node_modules/*' ! -path './target/*' | xargs wc -l | tail -1 | awk '{print $1}') |" >> metrics.md
+          echo "" >> metrics.md
+
+          # 依赖统计
+          echo "### 📦 Dependencies" >> metrics.md
+          echo "- Node.js dependencies: $(cat package.json | jq '.dependencies | keys | length')" >> metrics.md
+          echo "- Node.js dev dependencies: $(cat package.json | jq '.devDependencies | keys | length')" >> metrics.md
+          echo "- Rust dependencies: $(cat src-tauri/Cargo.toml | grep '^\[dependencies\]' -A 100 | grep -v '^\[' | grep -v '^$' | wc -l)" >> metrics.md
+          echo "" >> metrics.md
+
+          # 测试覆盖率（如果存在）
+          if [ -f "coverage/lcov.info" ]; then
+            echo "### 🧪 Test Coverage" >> metrics.md
+            COVERAGE=$(genhtml coverage/lcov.info --output-directory coverage_report 2>/dev/null | grep "lines......:" | awk '{print $2}' || echo "N/A")
+            echo "- Overall coverage: $COVERAGE" >> metrics.md
+            echo "" >> metrics.md
+          fi
+
+          # 安全扫描结果
+          echo "### 🔒 Security" >> metrics.md
+          echo "- Last security scan: $(date -u +"%Y-%m-%dT%H:%M:%SZ")" >> metrics.md
+          echo "- Known vulnerabilities: Check security tab" >> metrics.md
+          echo "" >> metrics.md
+
+          # 构建状态
+          echo "### 🏗️ Build Status" >> metrics.md
+          echo "- Last successful build: ${{ github.run_id }}" >> metrics.md
+          echo "- Build duration: ${{ job.status }}" >> metrics.md
+          echo "" >> metrics.md
+
+          cat metrics.md
+
+      - name: Update metrics in repository
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add metrics.md || true
+          git commit -m "chore: update project metrics" || true
+          git push || true
+
+      - name: Create metrics issue (monthly)
+        if: github.event.schedule == '0 9 1 * *'
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const fs = require('fs');
+            const metrics = fs.readFileSync('metrics.md', 'utf8');
+
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `📊 Monthly Project Metrics - ${new Date().toISOString().split('T')[0]}`,
+              body: metrics,
+              labels: ['metrics', 'monthly-report']
+            });
+
+  # 备份重要文件
+  backup:
+    name: Backup Important Files
+    runs-on: ubuntu-latest
+    if: github.event.inputs.task == 'all' || github.event.inputs.task == 'backup' || github.event.inputs.task == ''
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Create backup archive
+        run: |
+          # 创建备份归档
+          tar -czf backup-$(date +%Y%m%d).tar.gz \
+            src/ \
+            src-tauri/src/ \
+            docs/ \
+            package.json \
+            pnpm-lock.yaml \
+            src-tauri/Cargo.toml \
+            src-tauri/Cargo.lock \
+            tauri.conf.json \
+            vite.config.ts \
+            tsconfig*.json \
+            .eslintrc.json \
+            .prettierrc.json \
+            rustfmt.toml \
+            deny.toml \
+            mkdocs.yml \
+            CLAUDE.md
+
+      - name: Upload backup artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: project-backup-$(date +%Y%m%d)
+          path: backup-*.tar.gz
+          retention-days: 90
+
+      - name: Create backup release (monthly)
+        if: github.event.schedule == '0 9 1 * *'
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: backup-$(date +%Y%m%d)
+          name: Monthly Backup - $(date +%Y-%m-%d)
+          body: |
+            ## 📦 Monthly Project Backup
+
+            This is an automated backup of the reeftotem-assistant project.
+
+            **Date:** $(date +%Y-%m-%d)
+            **Commit:** ${{ github.sha }}
+
+            **Contents:**
+            - Source code (src/, src-tauri/src/)
+            - Configuration files
+            - Documentation
+            - Package manifests
+            - Build configurations
+
+            **Note:** This is a backup archive, not a release version.
+
+            ---
+            *Created by automated backup workflow*
+          files: backup-*.tar.gz
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # 维护总结
+  summary:
+    name: Maintenance Summary
+    if: always()
+    needs: [cleanup, updates, metrics, backup]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Generate maintenance summary
+        run: |
+          echo "## 🛠️ Maintenance Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Task | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Cleanup | ${{ needs.cleanup.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Updates | ${{ needs.updates.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Metrics | ${{ needs.metrics.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Backup | ${{ needs.backup.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Completed at:** $(date -u +"%Y-%m-%dT%H:%M:%SZ")" >> $GITHUB_STEP_SUMMARY
+
+      - name: Send notification on failure
+        if: contains(needs.*.result, 'failure')
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const failedTasks = context.payload.inputs?.task === 'all'
+              ? ['cleanup', 'updates', 'metrics', 'backup']
+              : [context.payload.inputs.task];
+
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: '🚨 Maintenance Task Failed',
+              body: `Maintenance task(s) failed on ${new Date().toISOString()}
+
+**Failed tasks:** ${failedTasks.filter(task => needs[task]?.result === 'failure').join(', ')}
+
+**Workflow run:** ${context.payload.repository.html_url}/actions/runs/${context.runId}
+
+Please check the workflow logs and fix any issues.`,
+              labels: ['maintenance', 'bug']
+            });

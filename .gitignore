@@ -6,6 +6,8 @@ node_modules/
 # Tauri specific
 src-tauri/target/
 src-tauri/Cargo.lock
+src-tauri/src/assets/
+src-tauri/public/
 
 # Build outputs
 dist/
@@ -117,7 +119,11 @@ temp/
 *.mov
 *.wmv
 
+# Rust analyzer output
+target/
+
 # Backup files
+backup/
 *.bak
 *.backup
 *~

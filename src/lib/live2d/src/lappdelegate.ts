@@ -12,9 +12,8 @@ import { LAppPal } from './lapppal';
 import { LAppSubdelegate } from './lappsubdelegate';
 import { CubismLogError } from '../Framework/src/utils/cubismdebug';
 // Live2D Core 应该已在 entry 文件中加载
-// 确保全局 Live2DCubismCore 可用
+// Live2DCubismCore 类型已在 Core/live2dcubismcore.d.ts 中声明
 declare global {
-  var Live2DCubismCore: any;
   var LAppDelegate: any; // 添加全局类型声明
 }
 // 从正确的位置导入ResourceModel
@@ -24,6 +23,11 @@ import { ResourceModel } from '../types';
 export type { ResourceModel };
 
 export let s_instance: LAppDelegate = null;
+
+// 全局单例存储，确保跨模块一致性
+declare global {
+  var LAppDelegateGlobalInstance: LAppDelegate | null;
+}
 
 /**
  * アプリケーションクラス。
@@ -37,12 +41,18 @@ export class LAppDelegate {
    * @return クラスのインスタンス
    */
   public static getInstance(): LAppDelegate {
+    // 优先使用全局实例，确保跨模块一致性
+    if (typeof window !== 'undefined' && (window as any).LAppDelegateGlobalInstance) {
+      return (window as any).LAppDelegateGlobalInstance;
+    }
+
     if (s_instance == null) {
       s_instance = new LAppDelegate();
-      // 🚀 将实例设置到全局变量，供前端组件直接访问
+
+      // 将实例同时设置到模块变量和全局变量，确保跨模块访问
       if (typeof window !== 'undefined') {
+        (window as any).LAppDelegateGlobalInstance = s_instance;
         (window as any).LAppDelegate = LAppDelegate;
-        console.log('✅ LAppDelegate实例已设置到全局变量');
       }
     }
 
@@ -55,6 +65,12 @@ export class LAppDelegate {
   public static releaseInstance(): void {
     if (s_instance != null) {
       s_instance.release();
+    }
+
+    // 清理全局实例存储
+    if (typeof window !== 'undefined') {
+      (window as any).LAppDelegateGlobalInstance = null;
+      (window as any).LAppDelegate = null;
     }
 
     s_instance = null;
@@ -145,16 +161,17 @@ export class LAppDelegate {
     CubismFramework.dispose();
 
     this._cubismOption = null;
+    this._initialized = false;
   }
 
   /**
    * イベントリスナーを解除する。
    */
   private releaseEventListener(): void {
-    document.removeEventListener('pointerup', onPointerBegan);
+    document.removeEventListener('pointerdown', onPointerBegan);
     document.removeEventListener('pointermove', onPointerMoved);
-    document.removeEventListener('pointerdown', onPointerEnded);
-    document.removeEventListener('pointerdown', onPointerCancel);
+    document.removeEventListener('pointerup', onPointerEnded);
+    document.removeEventListener('pointercancel', onPointerCancel);
   }
 
   /**
@@ -177,12 +194,17 @@ export class LAppDelegate {
    * APPに必要な物を初期化する。
    */
   public initialize(): boolean {
+    if (this._initialized) {
+      return true;
+    }
+
     // Cubism SDKの初期化
     this.initializeCubism();
 
     this.initializeSubdelegates();
     this.initializeEventListener();
 
+    this._initialized = true;
     return true;
   }
 
@@ -241,11 +263,16 @@ export class LAppDelegate {
     for (let i = 0; i < LAppDefine.CanvasNum; i++) {
       // const canvas = document.createElement('canvas');
       // 默认只有一个 live2dCanvas 画布
-      const canvas = document.getElementById('live2dCanvas') as HTMLCanvasElement;
-      if (!canvas) {
-        throw new Error('Canvas element with id "live2dCanvas" not found. Make sure the React component has rendered the canvas.');
+      const canvas = document.getElementById('live2dCanvas') as HTMLCanvasElement | null;
+      const fallbackCanvas = document.querySelector('canvas.live2d-canvas') as HTMLCanvasElement | null;
+      const targetCanvas = canvas ?? fallbackCanvas;
+      if (!targetCanvas) {
+        throw new Error('Live2D canvas not found. Ensure the React component has rendered the canvas.');
       }
-            this._canvases.pushBack(canvas);
+      if (!canvas && fallbackCanvas) {
+        console.warn('live2dCanvas id not found, falling back to .live2d-canvas');
+      }
+      this._canvases.pushBack(targetCanvas);
       // canvas.style.width = `${width}vw`;
       // canvas.style.height = `${height}vh`;
 
@@ -273,8 +300,158 @@ export class LAppDelegate {
     this._subdelegates.at(0).changeCharacter(character);
   }
 
+  public setExpression(expressionName: string): void {
+    const model = this.getPrimaryModel();
+    if (!model) {
+      console.warn('LAppDelegate.setExpression: 当前没有可用模型');
+      return;
+    }
+
+    const expressionMap = (model as any)._expressions;
+    let targetExpression = expressionName;
+
+    if (expressionMap && typeof expressionMap.getSize === 'function') {
+      const lowerName = expressionName.toLowerCase();
+      let matched: string | null = null;
+
+      for (let i = 0; i < expressionMap.getSize(); i++) {
+        const entry = expressionMap._keyValues?.[i];
+        if (!entry?.first) continue;
+        const key = String(entry.first);
+        if (key.toLowerCase() === lowerName) {
+          matched = key;
+          break;
+        }
+        if (!matched && key.toLowerCase().includes(lowerName)) {
+          matched = key;
+        }
+      }
+
+      if (matched) {
+        targetExpression = matched;
+      }
+    }
+
+    if (typeof model.setExpression === 'function') {
+      model.setExpression(targetExpression);
+    } else {
+      console.warn('LAppDelegate.setExpression: 模型不支持表情切换');
+    }
+  }
+
+  public startMotion(motionName: string): void {
+    const model = this.getPrimaryModel();
+    if (!model) {
+      console.warn('LAppDelegate.startMotion: 当前没有可用模型');
+      return;
+    }
+
+    const modelSetting = (model as any)._modelSetting;
+    if (!modelSetting || typeof modelSetting.getMotionCount !== 'function') {
+      console.warn('LAppDelegate.startMotion: 模型动作配置不可用');
+      return;
+    }
+    const lowerName = motionName.toLowerCase();
+    let targetGroup: string | null = null;
+
+    if (typeof modelSetting.getMotionGroupCount === 'function' &&
+        typeof modelSetting.getMotionGroupName === 'function') {
+      const groupCount = modelSetting.getMotionGroupCount();
+      for (let i = 0; i < groupCount; i++) {
+        const groupName = modelSetting.getMotionGroupName(i);
+        if (typeof groupName !== 'string') continue;
+        if (groupName.toLowerCase() === lowerName) {
+          targetGroup = groupName;
+          break;
+        }
+        if (!targetGroup && groupName.toLowerCase().includes(lowerName)) {
+          targetGroup = groupName;
+        }
+      }
+    }
+
+    if (!targetGroup && modelSetting.getMotionCount(motionName) > 0) {
+      targetGroup = motionName;
+    }
+
+    if (!targetGroup && modelSetting.getMotionCount(LAppDefine.MotionGroupTapBody) > 0) {
+      targetGroup = LAppDefine.MotionGroupTapBody;
+    }
+    if (!targetGroup && modelSetting.getMotionCount(LAppDefine.MotionGroupIdle) > 0) {
+      targetGroup = LAppDefine.MotionGroupIdle;
+    }
+
+    if (!targetGroup) {
+      console.warn('LAppDelegate.startMotion: 未找到可用动作组', motionName);
+      return;
+    }
+
+    if (typeof model.startRandomMotion === 'function') {
+      model.startRandomMotion(targetGroup, LAppDefine.PriorityNormal);
+    }
+  }
+
+  public setEyeTracking(x: number, y: number): void {
+    const model = this.getPrimaryModel();
+    if (!model) {
+      return;
+    }
+
+    const normalizedX = Math.max(0, Math.min(1, x));
+    const normalizedY = Math.max(0, Math.min(1, y));
+    const offsetX = (normalizedX - 0.5) * 2;
+    const offsetY = (0.5 - normalizedY) * 2;
+
+    const modelAny = model as any;
+    if (modelAny._dragManager && typeof modelAny._dragManager.set === 'function') {
+      modelAny._dragManager.set(offsetX, offsetY);
+    }
+  }
+
+  public setLipSync(value: number): void {
+    const model = this.getPrimaryModel();
+    if (!model || !model.getModel()) {
+      return;
+    }
+
+    const coreModel = model.getModel();
+    const normalized = Math.max(0, Math.min(1, value));
+    const lipSyncIds = (model as any)._lipSyncIds;
+
+    if (!lipSyncIds || typeof lipSyncIds.getSize !== 'function') {
+      return;
+    }
+
+    for (let i = 0; i < lipSyncIds.getSize(); i++) {
+      try {
+        coreModel.addParameterValueById(lipSyncIds.at(i), normalized, 0.8);
+      } catch (error) {
+        console.warn('LAppDelegate.setLipSync: 设置口型失败', error);
+      }
+    }
+  }
+
   public getSubdelegate(): csmVector<LAppSubdelegate> {
     return this._subdelegates;
+  }
+
+  private getPrimaryModel(): any | null {
+    const subdelegate = this._subdelegates.getSize() > 0 ? this._subdelegates.at(0) : null;
+    if (!subdelegate) {
+      return null;
+    }
+
+    const live2dManager = subdelegate.getLive2DManager?.();
+    if (!live2dManager || !live2dManager._models || live2dManager._models.getSize() === 0) {
+      return null;
+    }
+
+    const model = live2dManager._models.at(0);
+    if (!model || !model.getModel?.()) {
+      return null;
+    }
+
+    return model;
   }
 
   /**
@@ -310,6 +487,7 @@ export class LAppDelegate {
   private _isIdle: boolean = false;
   private _idleCheckTime: number = 0;
   private _idleTimeout: number = 5000; // 5秒无交互后进入空闲状态
+  private _initialized: boolean = false;
 }
 
 function onPointerBegan(e: PointerEvent): void {

@@ -37,15 +37,6 @@ export const ResourcesPath = import.meta.env.DEV
   ? '/assets/live2d/characters/free/'  // 开发环境使用绝对路径
   : '/assets/live2d/characters/free/';  // 生产环境同样使用绝对路径
 
-// モデルの後ろにある背景の画像ファイル
-// export const BackImageName = 'back_class_normal.png';
-
-// 歯車
-// export const GearImageName = 'icon_gear.png';
-
-// 終了ボタン
-// export const PowerImageName = 'CloseNormal.png';
-
 // モデル定義---------------------------------------------
 // モデルを配置したディレクトリ名の配列
 // ディレクトリ名とmodel3.jsonの名前を一致させておくこと

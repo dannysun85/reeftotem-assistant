@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>English</string>
+	<key>CFBundleDisplayName</key>
+	<string>reeftotem-assistant</string>
+	<key>CFBundleExecutable</key>
+	<string>reeftotem-assistant</string>
+	<key>CFBundleIconFile</key>
+	<string>icon.icns</string>
+	<key>CFBundleIdentifier</key>
+	<string>com.sun.reeftotem-assistant</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>reeftotem-assistant</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.2.0-alpha</string>
+	<key>CFBundleVersion</key>
+	<string>0.2.0-alpha</string>
+	<key>CSResourcesFileMapped</key>
+	<true/>
+	<key>LSMinimumSystemVersion</key>
+	<string>10.13</string>
+	<key>LSRequiresCarbon</key>
+	<true/>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+
+	<!-- 透明窗口相关权限 -->
+	<key>NSRequiresAquaSystemAppearance</key>
+	<false/>
+	<key>LSUIElement</key>
+	<false/>
+
+	<!-- 允许窗口穿透和透明效果 -->
+	<key>NSWindowAllowsClippingByChildren</key>
+	<false/>
+	<key>NSWindowCollectionBehavior</key>
+	<string>NSWindowCollectionBehaviorCanJoinAllSpaces | NSWindowCollectionBehaviorStationary | NSWindowCollectionBehaviorIgnoresCycle</string>
+
+	<!-- 确保Live2D窗口的透明特性 -->
+	<key>NSSupportsAutomaticGraphicsSwitching</key>
+	<true/>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoads</key>
+		<true/>
+	</dict>
+
+	<!-- 麦克风权限（语音交互需要） -->
+	<key>NSMicrophoneUsageDescription</key>
+	<string>该应用需要使用麦克风进行语音识别和交互功能</string>
+
+	<!-- 网络权限（腾讯云语音服务需要） -->
+	<key>NSInternetUsageDescription</key>
+	<string>该应用需要网络连接来使用语音识别和合成服务</string>
+</dict>
+</plist>

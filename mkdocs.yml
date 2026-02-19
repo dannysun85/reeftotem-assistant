@@ -1,0 +1,202 @@
+site_name: Reeftotem Assistant
+site_description: Live2D 虚拟助手桌面应用 - 完整的语音交互和 AI 对话系统
+site_author: dannysun
+site_url: https://sun.github.io/reeftotem-assistant
+
+# Repository
+repo_name: sun/reeftotem-assistant
+repo_url: https://github.com/sun/reeftotem-assistant
+edit_uri: edit/main/docs/
+
+# Theme
+theme:
+  name: material
+  language: zh
+  palette:
+    # Light mode
+    - scheme: default
+      primary: pink
+      accent: deep purple
+      toggle:
+        icon: material/brightness-7
+        name: 切换到暗色模式
+    # Dark mode
+    - scheme: slate
+      primary: pink
+      accent: deep purple
+      toggle:
+        icon: material/brightness-4
+        name: 切换到亮色模式
+  font:
+    text: Roboto
+    code: Roboto Mono
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.sections
+    - navigation.expand
+    - navigation.indexes
+    - navigation.top
+    - search.highlight
+    - search.share
+    - header.autohide
+    - content.code.copy
+    - content.code.annotate
+  icon:
+    repo: fontawesome/brands/github
+    logo: assets/logo.svg
+
+# Plugins
+plugins:
+  - search:
+      separator: '[\s\-\.]+'
+      min_search_length: 2
+      prebuild_index: true
+  - git-revision-date-localized:
+      type: datetime
+      timezone: Asia/Shanghai
+      locale: zh
+      enable_creation_date: true
+  - git-committers:
+      repository: sun/reeftotem-assistant
+      branch: main
+  - minify:
+      minify_html: true
+      minify_js: true
+      minify_css: true
+      htmlmin_opts:
+        remove_comments: true
+  - redirects:
+      redirect_maps:
+        'old-path.md': 'new-path.md'
+
+# Markdown Extensions
+markdown_extensions:
+  - abbr
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - meta
+  - md_in_html
+  - toc:
+      permalink: true
+      title: 目录
+  - tables
+  - pymdownx.arithmatex:
+      generic: true
+  - pymdownx.betterem:
+      smart_enable: all
+  - pymdownx.caret
+  - pymdownx.details
+  - pymdownx.emoji:
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.keys
+  - pymdownx.magiclink:
+      normalize_issue_symbols: true
+      repo_url_shorthand: true
+      user: sun
+      repo: reeftotem-assistant
+  - pymdownx.mark
+  - pymdownx.smartsymbols
+  - pymdownx.snippets:
+      auto_append:
+        - includes/mkdocs.md
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+      combine_header_slug: true
+      slugify: !!python/object/apply:pymdownx.slugs.slugify
+        kwds:
+          case: lower
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - pymdownx.tilde
+
+# Navigation
+nav:
+  - 首页: index.md
+  - 开始使用:
+    - introduction/index.md
+    - 系统要求: introduction/requirements.md
+    - 快速开始: introduction/quickstart.md
+    - 安装指南: introduction/installation.md
+  - 用户指南:
+    - user-guide/index.md
+    - 界面介绍: user-guide/interface.md
+    - 语音交互: user-guide/voice-interaction.md
+    - Live2D 设置: user-guide/live2d-settings.md
+    - AI 配置: user-guide/ai-configuration.md
+    - 高级功能: user-guide/advanced-features.md
+    - 故障排除: user-guide/troubleshooting.md
+  - 开发文档:
+    - developer/index.md
+    - 项目架构: developer/architecture.md
+    - 开发环境设置: developer/setup.md
+    - 组件开发: developer/components.md
+    - API 参考: developer/api.md
+    - 测试指南: developer/testing.md
+    - 构建和部署: developer/build-deploy.md
+  - 架构文档:
+    - architecture/index.md
+    - 整体架构: architecture/overview.md
+    - 前端架构: architecture/frontend.md
+    - 后端架构: architecture/backend.md
+    - 模块说明: architecture/modules.md
+  - 发布说明:
+    - releases/index.md
+    - v0.2.0: releases/v0.2.0.md
+    - v0.1.3: releases/v0.1.3.md
+    - v0.1.2: releases/v0.1.2.md
+    - v0.1.1: releases/v0.1.1.md
+  - 贡献指南:
+    - contributing/index.md
+    - 代码贡献: contributing/code.md
+    - 文档贡献: contributing/documentation.md
+    - 问题报告: contributing/issues.md
+    - 行为准则: contributing/coc.md
+
+# Extra CSS and JS
+extra_css:
+  - assets/extra.css
+  - assets/custom.css
+
+extra_javascript:
+  - assets/extra.js
+  - assets/mathjax.js
+  - https://polyfill.io/v3/polyfill.min.js?features=es6
+  - https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js
+
+# Extra data
+extra:
+  analytics:
+    provider: google
+    property: G-XXXXXXXXXX
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/sun/reeftotem-assistant
+    - icon: fontawesome/brands/docker
+      link: https://hub.docker.com/r/sun/reeftotem-assistant
+    - icon: fontawesome/solid/paper-plane
+      link: mailto:contact@example.com
+  version:
+    provider: mike
+    default: stable
+  generator: false
+
+# Copyright
+copyright: |
+  &copy; 2024 dannysun -
+  <a href="#__consent">更改 Cookie 设置</a>

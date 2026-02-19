@@ -472,7 +472,7 @@ export const Live2DVoiceInteraction: React.FC = () => {
         // 添加TTS历史记录
         const ttsRecord = {
           id: Date.now(),
-          text: aiResponse,
+          text: aiResponse.text,
           voiceType: ttsConfig.voiceType,
           duration: ttsResult.duration,
           timestamp: new Date(),
@@ -491,10 +491,10 @@ export const Live2DVoiceInteraction: React.FC = () => {
         }));
 
         await triggerLive2DMotion('start_speaking');
-        await triggerLive2DLipSync(aiResponse, ttsResult.audioData);
+        await triggerLive2DLipSync(aiResponse.text, ttsResult.audioData);
 
         // 播放音频
-        await playAudioWithLive2D(ttsResult.audioData, aiResponse);
+        await playAudioWithLive2D(ttsResult.audioData, aiResponse.text);
 
       } else {
         console.log('❌ 语音合成失败');
@@ -917,8 +917,9 @@ export const Live2DVoiceInteraction: React.FC = () => {
                       text: '这是一个语音合成测试'
                     });
                     console.log('✅ TTS命令测试成功:', result);
-                    alert(`TTS命令测试成功！音频大小: ${result.audioData?.length || 0} bytes`);
-                  } catch (error) {
+                    const ttsResult = result as { audioData?: { length?: number } };
+                    alert(`TTS命令测试成功！音频大小: ${ttsResult.audioData?.length || 0} bytes`);
+                  } catch (error: any) {
                     console.error('❌ TTS命令测试失败:', error);
                     alert(`TTS命令测试失败: ${error.message}`);
                   }
@@ -951,8 +952,9 @@ export const Live2DVoiceInteraction: React.FC = () => {
                       audioData: testAudioData
                     });
                     console.log('✅ ASR命令测试成功:', result);
-                    alert(`ASR命令测试成功！识别结果: ${result.text || '(无内容)'}`);
-                  } catch (error) {
+                    const asrResult = result as { text?: string };
+                    alert(`ASR命令测试成功！识别结果: ${asrResult.text || '(无内容)'}`);
+                  } catch (error: any) {
                     console.error('❌ ASR命令测试失败:', error);
                     alert(`ASR命令测试失败: ${error.message}`);
                   }

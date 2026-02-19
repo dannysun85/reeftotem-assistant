@@ -397,17 +397,16 @@ export class LAppModel extends CubismUserModel {
       }
 
       this._modelSetting.getLayoutMap(layout);
-      
+
       // 应用layout（会设置位置和初始大小）
       this._modelMatrix.setupFromLayout(layout);
-      
-      // 🔧 最终方案：统一使用setHeight，优先保证视觉统一性
-      // 所有模型统一使用相同的height值，确保视觉一致性
-      // 调整后的最佳值：1.3（平衡了大小和统一性）
-      const STANDARD_HEIGHT = 1.3;
-      this._modelMatrix.setHeight(STANDARD_HEIGHT);
 
-      
+      // 模型高度设为 2.0 逻辑单位（填满 Y 轴 -1 到 +1）
+      // 纵横比补偿由投影矩阵（onUpdate）处理
+      // 注意：不调用 setCenterPosition — SDK 顶点已以原点为中心
+      this._modelMatrix.setHeight(2.0);
+
+
       this._state = LoadStep.LoadMotion;
 
       // callback
@@ -462,6 +461,12 @@ export class LAppModel extends CubismUserModel {
     if (this._state == LoadStep.LoadTexture) {
       // テクスチャ読み込み用
       const textureCount: number = this._modelSetting.getTextureCount();
+      if (textureCount === 0) {
+        console.warn('LAppModel.setupTextures: 模型未返回纹理列表，渲染可能为空');
+        this._state = LoadStep.CompleteSetup;
+        Live2DManager.getInstance().setReady(true);
+        return;
+      }
 
       for (
         let modelTextureNumber = 0;
@@ -487,6 +492,7 @@ export class LAppModel extends CubismUserModel {
           if (this._textureCount >= textureCount) {
             // ロード完了
             this._state = LoadStep.CompleteSetup;
+            Live2DManager.getInstance().setReady(true);
           }
         };
 
@@ -499,7 +505,6 @@ export class LAppModel extends CubismUserModel {
 
       this._state = LoadStep.WaitLoadTexture;
     }
-    Live2DManager.getInstance().setReady(true);
   }
 
   /**
@@ -678,14 +683,6 @@ export class LAppModel extends CubismUserModel {
       motion.setBeganMotionHandler(onBeganMotionHandler);
       motion.setFinishedMotionHandler(onFinishedMotionHandler);
     }
-
-    //voice
-    // const voice = this._modelSetting.getMotionSoundFileName(group, no);
-    // if (voice.localeCompare('') != 0) {
-    //   let path = voice;
-    //   path = this._modelHomeDir + path;
-    //   this._wavFileHandler.start(path);
-    // }
 
     if (this._debugMode) {
       LAppPal.printMessage(`[APP]start motion: [${group}_${no}`);
@@ -1008,11 +1005,7 @@ export class LAppModel extends CubismUserModel {
    */
   public reapplyStandardScale(): void {
     if (this._modelMatrix) {
-      const STANDARD_HEIGHT = 1.3;
-      this._modelMatrix.setHeight(STANDARD_HEIGHT);
-      console.log(`✅ LAppModel: 已重新应用标准缩放 (height=${STANDARD_HEIGHT})`);
-    } else {
-      console.warn('⚠️ LAppModel: 无法重新应用缩放，_modelMatrix 不可用');
+      this._modelMatrix.setHeight(2.0);
     }
   }
 

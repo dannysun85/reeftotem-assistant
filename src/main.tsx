@@ -1,21 +1,24 @@
-console.log("main.tsx loading...");
-
 import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
 import "./index.css";
+import { createLogger, initializeLogger } from "./utils/Logger";
 
-console.log("imports loaded");
+initializeLogger('main');
+const logger = createLogger('main');
+
+logger.info("main.tsx loading");
+logger.info("imports loaded");
 
 const root = document.getElementById("root");
-console.log("root element:", root);
+logger.debug("root element resolved", root);
 
 if (root) {
-  console.log("creating React root...");
+  logger.info("creating React root");
   const reactRoot = ReactDOM.createRoot(root);
-  console.log("rendering App...");
+  logger.info("rendering App");
   reactRoot.render(<App />);
-  console.log("App rendered!");
+  logger.info("App rendered");
 } else {
-  console.error("Root element not found!");
+  logger.error("Root element not found");
 }

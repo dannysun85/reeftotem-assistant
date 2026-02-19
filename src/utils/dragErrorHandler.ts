@@ -20,7 +20,7 @@ export enum DragErrorType {
   RUST_BACKEND_ERROR = 'RUST_BACKEND_ERROR',
   WINDOW_NOT_FOUND = 'WINDOW_NOT_FOUND',
   MONITOR_ACCESS_DENIED = 'MONITOR_ACCESS_DENIED',
-  Tauri_API_ERROR = 'TAURI_API_ERROR',
+  TAURI_API_ERROR = 'TAURI_API_ERROR',
 
   // 前端错误
   EDGE_DETECTION_NOT_INITIALIZED = 'EDGE_DETECTION_NOT_INITIALIZED',
@@ -318,7 +318,7 @@ export class DragErrorHandler {
    */
   private canRecover(errorType: DragErrorType): boolean {
     return errorType !== DragErrorType.PERMISSION_DENIED &&
-           errorType !== DragErrorType.CRITICAL;
+           errorType !== DragErrorType.UNKNOWN_ERROR;
   }
 
   /**

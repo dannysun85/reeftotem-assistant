@@ -398,7 +398,7 @@ export const VoiceInteractionTester: React.FC = () => {
       result: {
         text: textToSynthesize,
         duration: result.duration,
-        size: result.audioData.length,
+        size: result.audioData.byteLength,
         url: audioUrl
       }
     });

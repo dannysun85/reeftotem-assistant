@@ -56,8 +56,8 @@ export const useLive2DLipSync = (): LipSyncReturn => {
       if (!model || !model.getModel()) return [];
 
       // 获取内置的_lipSyncIds参数
-      const lipSyncIds = model._lipSyncIds;
-      if (!lipSyncIds || lipSyncIds.length === 0) {
+      const lipSyncIds = (model as any)._lipSyncIds;
+      if (!lipSyncIds || lipSyncIds.getSize() === 0) {
         console.warn('Live2D模型没有配置唇形同步参数');
         return [];
       }

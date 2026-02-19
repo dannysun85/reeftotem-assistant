@@ -46,6 +46,7 @@ export class LAppTextureManager {
     usePremultiply: boolean,
     callback: (textureInfo: TextureInfo) => void
   ): void {
+    console.log('LAppTextureManager: 准备加载纹理', fileName);
     // search loaded texture already
     for (
       let ite: iterator<TextureInfo> = this._textures.begin();
@@ -65,6 +66,9 @@ export class LAppTextureManager {
           .img.addEventListener('load', (): void => callback(ite.ptr()), {
             passive: true
           });
+        ite.ptr().img.addEventListener('error', () => {
+          console.error('LAppTextureManager: 纹理加载失败(缓存)', fileName);
+        });
         ite.ptr().img.src = fileName;
         return;
       }
@@ -148,6 +152,9 @@ export class LAppTextureManager {
       },
       { passive: true }
     );
+    img.addEventListener('error', () => {
+      console.error('LAppTextureManager: 纹理加载失败', fileName);
+    });
     img.crossOrigin ="anonymous";
     img.src = fileName;
   }

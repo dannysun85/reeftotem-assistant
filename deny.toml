@@ -1,0 +1,136 @@
+# cargo-deny 配置文件
+# 用于检查 Rust 依赖的安全性和许可证合规性
+
+[graph]
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "x86_64-pc-windows-msvc",
+    "x86_64-apple-darwin",
+    "aarch64-apple-darwin",
+]
+all-features = true
+
+[output]
+format = "human"
+quiet = false
+
+[advisories]
+# 数据库路径
+db-path = "~/.cargo/advisory-db"
+db-urls = ["https://github.com/rustsec/advisory-db"]
+
+# 忽略的咨询 ID
+ignore = [
+    # 示例：忽略特定的咨询
+    # "RUSTSEC-2021-0001",
+]
+
+# 信息性咨询的警告级别
+informational-warnings = [
+    "unmaintained",
+    "unsound",
+    "linking",
+]
+
+# 检测到咨询时的严重性阈值
+severity-threshold = "medium"
+
+# 显示未维护包的数量
+vulnerability-alert-limit = 10
+
+# 未维护警告的数量
+yanked-alert-limit = 5
+
+[licenses]
+# 许可证列表
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-DFS-2016",
+    "CC0-1.0",
+    "MPL-2.0",
+]
+
+# 拒绝的许可证
+deny = [
+    "GPL-2.0",
+    "GPL-3.0",
+    "AGPL-1.0",
+    "AGPL-3.0",
+]
+
+# 许可证例外
+exceptions = [
+    # 示例：特定包使用例外许可证
+    # { allow = ["OpenSSL"], name = "ring", version = "*" },
+]
+
+# 信心阈值
+confidence-threshold = 0.8
+
+# 复制许可信息
+copyleft = "warn"
+
+# 未识别许可证的处理
+unlicensed = "deny"
+
+# 允许 OSI 批准的许可证
+allow-osi-fsf-free = "neither"
+
+# 默认许可证
+default = "deny"
+
+[bans]
+# 禁止重复的依赖
+multiple-versions = "warn"
+
+# 禁止特定版本的依赖
+deny = [
+    # 示例：禁止特定版本
+    # { name = "openssl-sys", version = "<0.9.60" },
+]
+
+# 跳过的树
+skip = [
+    # 示例：跳过检查特定的依赖树
+    # { name = "winapi", version = "=0.3.9" },
+]
+
+# 跳过重复的依赖
+skip-tree = [
+    # 示例：跳过整个依赖树
+    # { name = "windows-sys", version = "*" },
+]
+
+# 通配符版本的严重性
+wildcards = "warn"
+
+# 特征冲突
+highlight = "all"
+
+[licenses.private]
+# 忽略私有包的许可证检查
+ignore = false
+
+# 私有注册表
+registries = []
+
+[sources]
+# 未知源的处理
+unknown-registry = "warn"
+unknown-git = "warn"
+
+# 允许的 Git 源
+allow-git = [
+    # 示例：允许特定的 Git 源
+    # "https://github.com/rust-lang/cargo",
+]
+
+# 允许的注册表
+allow-registry = [
+    "https://github.com/rust-lang/crates.io-index",
+]

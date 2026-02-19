@@ -32,8 +32,6 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
   const menuRef = useRef<HTMLDivElement>(null);
   const [submenus, setSubmenus] = useState<Record<string, boolean>>({});
 
-  console.log('ContextMenu渲染状态:', { visible, x, y, menuItemsCount: menuItems.length });
-
   // 点击外部关闭菜单
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -96,9 +94,7 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
   const { x: adjustedX, y: adjustedY } = adjustPosition();
 
   const handleMenuItemClick = (item: MenuItem) => {
-    console.log('📋 菜单项被点击:', item.label || item.id, item.id);
     if (item.action) {
-      console.log('🚀 执行菜单项动作');
       item.action();
     }
     onClose();

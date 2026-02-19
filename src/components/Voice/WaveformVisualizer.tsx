@@ -240,7 +240,7 @@ export const VolumeIndicator: React.FC<VolumeIndicatorProps> = ({
       )}
 
       {/* 脉冲动画样式 */}
-      <style jsx>{`
+      <style>{`
         @keyframes pulse {
           0% {
             opacity: 1;

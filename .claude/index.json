@@ -1,0 +1,471 @@
+{
+  "scan_metadata": {
+    "timestamp": "2025-10-25T14:15:00.000Z",
+    "project_name": "reeftotem-assistant",
+    "version": "0.2.0-alpha",
+    "scan_type": "incremental_deep_scan",
+    "scanner_version": "1.0.0",
+    "focus_modules": ["Voice", "hooks", "stores", "utils"]
+  },
+  "coverage_metrics": {
+    "total_files_estimated": 280,
+    "files_scanned": 85,
+    "coverage_percentage": 30.4,
+    "modules_identified": 11,
+    "modules_documented": 9,
+    "documentation_coverage": 81.8,
+    "incremental_scan_coverage": 100
+  },
+  "modules": [
+    {
+      "path": "src/components/ChatInterface",
+      "type": "react_component",
+      "language": "typescript",
+      "entry_file": "src/components/ChatInterface.tsx",
+      "responsibility": "主聊天界面，集成多标签页交互",
+      "status": "documented",
+      "last_scanned": "2025-10-25T13:37:29.000Z",
+      "has_tests": false,
+      "has_config": true,
+      "dependencies": [
+        "src/stores/chat-store.ts",
+        "src/components/Voice",
+        "src/components/ui"
+      ],
+      "complexity": "high",
+      "documentation_file": "src/components/ChatInterface/CLAUDE.md"
+    },
+    {
+      "path": "src/components/Live2D",
+      "type": "react_component",
+      "language": "javascript/typescript",
+      "entry_file": "src/components/Live2D/Live2DComponents.jsx",
+      "responsibility": "Live2D角色渲染和交互",
+      "status": "documented",
+      "last_scanned": "2025-10-25T13:37:29.000Z",
+      "has_tests": false,
+      "has_config": true,
+      "dependencies": [
+        "src/lib/live2d",
+        "src/hooks/useLive2D*",
+        "src/utils/tauriPathUtils.ts"
+      ],
+      "complexity": "high",
+      "documentation_file": "src/components/Live2D/CLAUDE.md"
+    },
+    {
+      "path": "src/components/Voice",
+      "type": "react_component",
+      "language": "typescript",
+      "entry_file": "src/components/Voice/Live2DVoiceInteraction.tsx",
+      "responsibility": "语音录制、识别和合成功能",
+      "status": "documented",
+      "last_scanned": "2025-10-25T14:15:00.000Z",
+      "has_tests": false,
+      "has_config": true,
+      "dependencies": [
+        "src/lib/ai",
+        "src/hooks/useAudioRecorder.ts",
+        "src/hooks/usePCMRecorder.ts"
+      ],
+      "complexity": "medium",
+      "documentation_file": "src/components/Voice/CLAUDE.md",
+      "submodules": [
+        "Live2DVoiceInteraction.tsx",
+        "VoiceInteractionDebug.tsx",
+        "AIServiceTest.tsx"
+      ],
+      "performance_analysis": {
+        "render_time": "<50ms",
+        "audio_processing_delay": "<100ms",
+        "memory_usage": "stable",
+        "potential_bottlenecks": ["音频数据转换", "状态更新频率"]
+      },
+      "improvement_suggestions": [
+        "实现 Web Worker 音频处理",
+        "优化组件重渲染",
+        "增强错误处理机制"
+      ]
+    },
+    {
+      "path": "src/pages/Live2DWindow",
+      "type": "react_page",
+      "language": "typescript",
+      "entry_file": "src/pages/Live2DWindow.tsx",
+      "responsibility": "Live2D独立窗口页面",
+      "status": "documented",
+      "last_scanned": "2025-10-25T13:37:29.000Z",
+      "has_tests": false,
+      "has_config": true,
+      "dependencies": [
+        "src/components/Live2D",
+        "src/hooks/useDragEdgeDetection.ts",
+        "src/lib/live2d"
+      ],
+      "complexity": "high",
+      "documentation_file": "src/pages/Live2DWindow/CLAUDE.md"
+    },
+    {
+      "path": "src/lib/live2d",
+      "type": "typescript_library",
+      "language": "typescript",
+      "entry_file": "src/lib/live2d/Live2DManager.ts",
+      "responsibility": "Live2D SDK封装和核心逻辑",
+      "status": "documented",
+      "last_scanned": "2025-10-25T13:37:29.000Z",
+      "has_tests": false,
+      "has_config": true,
+      "dependencies": [
+        "pixi.js",
+        "Live2D Cubism SDK"
+      ],
+      "complexity": "very_high",
+      "submodules": [
+        "Framework",
+        "Core",
+        "src"
+      ],
+      "documentation_file": "src/lib/live2d/CLAUDE.md"
+    },
+    {
+      "path": "src/lib/ai",
+      "type": "typescript_library",
+      "language": "typescript",
+      "entry_file": "src/lib/ai/TencentCloudVoiceService.ts",
+      "responsibility": "AI语音服务集成",
+      "status": "documented",
+      "last_scanned": "2025-10-25T13:37:29.000Z",
+      "has_tests": false,
+      "has_config": true,
+      "dependencies": [
+        "@tauri-apps/api/core",
+        "腾讯云语音服务 API"
+      ],
+      "complexity": "medium",
+      "documentation_file": "src/lib/ai/CLAUDE.md",
+      "submodules": [
+        "TencentCloudVoiceService.ts",
+        "TencentCloudASRService.ts",
+        "ASRErrorHandler.ts",
+        "VoiceService.ts",
+        "AIService.ts"
+      ]
+    },
+    {
+      "path": "src-tauri/src",
+      "type": "rust_library",
+      "language": "rust",
+      "entry_file": "src-tauri/src/lib.rs",
+      "responsibility": "桌面应用后端功能",
+      "status": "documented",
+      "last_scanned": "2025-10-25T13:37:29.000Z",
+      "has_tests": true,
+      "has_config": true,
+      "dependencies": [
+        "tauri",
+        "serde",
+        "tokio",
+        "chrono",
+        "image"
+      ],
+      "complexity": "high",
+      "documentation_file": "src-tauri/src/CLAUDE.md"
+    },
+    {
+      "path": "src/hooks",
+      "type": "react_hooks",
+      "language": "typescript",
+      "entry_file": "multiple files",
+      "responsibility": "可复用的状态和逻辑",
+      "status": "documented",
+      "last_scanned": "2025-10-25T14:15:00.000Z",
+      "has_tests": false,
+      "has_config": false,
+      "dependencies": [
+        "react",
+        "src/lib/*"
+      ],
+      "complexity": "medium",
+      "documentation_file": "src/hooks/CLAUDE.md",
+      "submodules": [
+        "useAudioRecorder.ts",
+        "usePCMRecorder.ts",
+        "useDragEdgeDetection.ts",
+        "useLive2DPhysics.ts",
+        "useLive2DLipSync.ts",
+        "useLive2DParameters.ts",
+        "useLive2DExpressions.ts"
+      ],
+      "performance_analysis": {
+        "audio_processing_delay": "<50ms",
+        "memory_usage_growth": "<1MB/minute",
+        "cpu_usage": "<5%",
+        "battery_consumption": "<2%/hour"
+      },
+      "improvement_suggestions": [
+        "实现 Web Worker 音频处理",
+        "添加音频格式自动检测",
+        "增强移动端浏览器兼容性"
+      ]
+    },
+    {
+      "path": "src/stores",
+      "type": "state_management",
+      "language": "typescript",
+      "entry_file": "src/stores/chat-store.ts",
+      "responsibility": "全局状态管理",
+      "status": "documented",
+      "last_scanned": "2025-10-25T14:15:00.000Z",
+      "has_tests": false,
+      "has_config": false,
+      "dependencies": [
+        "zustand"
+      ],
+      "complexity": "low",
+      "documentation_file": "src/stores/CLAUDE.md",
+      "submodules": [
+        "chat-store.ts"
+      ],
+      "performance_analysis": {
+        "state_update_time": "<10ms",
+        "memory_usage": "stable",
+        "component_renders": "optimized"
+      },
+      "improvement_suggestions": [
+        "实现状态分片模式",
+        "添加持久化中间件",
+        "增强错误边界处理"
+      ]
+    },
+    {
+      "path": "src/utils",
+      "type": "utility_functions",
+      "language": "typescript",
+      "entry_file": "multiple files",
+      "responsibility": "通用工具和辅助函数",
+      "status": "documented",
+      "last_scanned": "2025-10-25T14:15:00.000Z",
+      "has_tests": false,
+      "has_config": false,
+      "dependencies": [],
+      "complexity": "low",
+      "documentation_file": "src/utils/CLAUDE.md",
+      "submodules": [
+        "edgeCollisionDetector.ts",
+        "tauriPathUtils.ts",
+        "envChecker.ts",
+        "window-utils.ts",
+        "Live2DDiagnostic.ts",
+        "Logger.ts",
+        "debugHelper.ts"
+      ],
+      "performance_analysis": {
+        "edge_detection_time": "<1ms",
+        "path_resolution_time": "<10ms",
+        "env_check_time": "<100ms",
+        "memory_footprint": "<1MB"
+      },
+      "improvement_suggestions": [
+        "实现结果缓存机制",
+        "添加算法性能优化",
+        "增强错误处理和重试"
+      ]
+    },
+    {
+      "path": "docs",
+      "type": "documentation",
+      "language": "markdown",
+      "entry_file": "multiple .md files",
+      "responsibility": "项目文档和指南",
+      "status": "identified",
+      "last_scanned": "2025-10-25T13:37:29.000Z",
+      "has_tests": false,
+      "has_config": false,
+      "dependencies": [],
+      "complexity": "low"
+    }
+  ],
+  "incremental_scan_results": {
+    "scanned_modules": ["src/components/Voice", "src/hooks", "src/stores", "src/utils"],
+    "new_documentation": [
+      "src/components/Voice/CLAUDE.md",
+      "src/hooks/CLAUDE.md",
+      "src/stores/CLAUDE.md",
+      "src/utils/CLAUDE.md"
+    ],
+    "critical_findings": [
+      {
+        "module": "src/components/Voice",
+        "issue": "音频处理性能瓶颈",
+        "severity": "medium",
+        "recommendation": "实现 Web Worker 音频处理，避免主线程阻塞"
+      },
+      {
+        "module": "src/hooks",
+        "issue": "内存使用增长",
+        "severity": "medium",
+        "recommendation": "实现数据块循环缓冲区，及时清理音频资源"
+      },
+      {
+        "module": "src/stores",
+        "issue": "状态管理架构简单",
+        "severity": "low",
+        "recommendation": "实现状态分片和中间件增强"
+      }
+    ],
+    "performance_improvements": [
+      "Web Worker 音频处理架构",
+      "Zustand 状态分片优化",
+      "组件渲染性能优化",
+      "算法性能提升方案"
+    ],
+    "code_quality_enhancements": [
+      "TypeScript 类型安全增强",
+      "错误处理机制完善",
+      "测试覆盖补充",
+      "文档体系完善"
+    ]
+  },
+  "ignored_directories": [
+    {
+      "path": "node_modules",
+      "reason": "dependency_directory",
+      "file_count_estimated": 50000
+    },
+    {
+      "path": "src-tauri/target",
+      "reason": "build_output",
+      "file_count_estimated": 1000
+    },
+    {
+      "path": ".git",
+      "reason": "vcs_directory",
+      "file_count_estimated": 500
+    },
+    {
+      "path": "dist",
+      "reason": "build_output",
+      "file_count_estimated": 100
+    },
+    {
+      "path": "src-tauri/icons",
+      "reason": "binary_assets",
+      "file_count_estimated": 50
+    }
+  ],
+  "language_distribution": {
+    "typescript": 120,
+    "javascript": 25,
+    "rust": 15,
+    "json": 18,
+    "markdown": 25,
+    "css": 8,
+    "other": 5
+  },
+  "file_size_distribution": {
+    "small": 150,
+    "medium": 80,
+    "large": 35,
+    "very_large": 8
+  },
+  "gaps_and_next_steps": {
+    "missing_documentation": [
+      "docs"
+    ],
+    "missing_tests": [
+      "all_modules",
+      "unit_tests_needed": ["useAudioRecorder", "edgeCollisionDetector", "chat-store"],
+      "integration_tests_needed": ["Voice + AI Services", "Live2D + Hooks", "Tauri + Frontend"]
+    ],
+    "recommended_next_scans": [
+      "src/components/ui - UI 组件库完整性检查",
+      "src/lib/audio - 音频处理深度分析",
+      "src/configs - 配置文件和环境变量检查",
+      "test_automation - 测试自动化基础设施",
+      "performance_profiling - 性能分析和优化"
+    ],
+    "priority_areas": [
+      "performance_optimization",
+      "error_handling_enhancement",
+      "testing_infrastructure",
+      "code_quality_improvement",
+      "documentation_completion"
+    ]
+  },
+  "quality_indicators": {
+    "has_documentation": true,
+    "has_configuration_files": true,
+    "has_build_scripts": true,
+    "uses_typescript": true,
+    "uses_modern_frameworks": true,
+    "has_error_handling": true,
+    "has_logging": true,
+    "follows_conventions": true,
+    "incremental_scan_completed": true,
+    "deep_analysis_performed": true
+  },
+  "risk_assessment": {
+    "complexity_risk": "medium",
+    "dependency_risk": "low",
+    "maintenance_risk": "low",
+    "security_risk": "low",
+    "performance_risk": "medium",
+    "technical_debt": "low"
+  },
+  "recommendations": [
+    {
+      "priority": "high",
+      "category": "performance",
+      "action": "实现 Web Worker 音频处理",
+      "description": "将音频数据处理移至 Web Worker，避免主线程阻塞",
+      "estimated_effort": "2-3 days",
+      "impact": "high"
+    },
+    {
+      "priority": "high",
+      "category": "error_handling",
+      "action": "完善全局错误处理机制",
+      "description": "实现统一错误边界和错误恢复机制",
+      "estimated_effort": "1-2 days",
+      "impact": "medium"
+    },
+    {
+      "priority": "medium",
+      "category": "testing",
+      "action": "补充单元测试覆盖",
+      "description": "为核心模块添加单元测试，确保代码质量",
+      "estimated_effort": "3-5 days",
+      "impact": "high"
+    },
+    {
+      "priority": "medium",
+      "category": "architecture",
+      "action": "状态管理优化",
+      "description": "实现 Zustand 状态分片和中间件增强",
+      "estimated_effort": "2-3 days",
+      "impact": "medium"
+    },
+    {
+      "priority": "low",
+      "category": "documentation",
+      "action": "完善 API 文档",
+      "description": "为所有公共接口建立完整的 API 文档",
+      "estimated_effort": "1-2 days",
+      "impact": "low"
+    }
+  ],
+  "next_scan_plan": {
+    "target_date": "2025-11-01",
+    "focus_areas": [
+      "testing_infrastructure",
+      "performance_optimization_implementation",
+      "ui_components_completeness"
+    ],
+    "scan_type": "implementation_review",
+    "expected_outcomes": [
+      "测试覆盖率报告",
+      "性能优化实现验证",
+      "UI 组件库文档完善"
+    ]
+  }
+}

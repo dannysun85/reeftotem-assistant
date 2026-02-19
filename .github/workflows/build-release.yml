@@ -1,0 +1,384 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  release:
+    types: [ published ]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g., v0.2.0)'
+        required: true
+        type: string
+      prerelease:
+        description: 'Is this a prerelease?'
+        required: false
+        type: boolean
+        default: false
+
+env:
+  NODE_VERSION: '20'
+  RUST_VERSION: '1.75'
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # 构建前端
+  build-frontend:
+    name: Build Frontend
+    runs-on: ubuntu-latest
+    outputs:
+      frontend-sha: ${{ steps.build.outputs.frontend-sha }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 8
+
+      - name: Get pnpm store directory
+        shell: bash
+        run: |
+          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v3
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build frontend
+        id: build
+        run: |
+          pnpm build
+          cp live2d-window.html dist/
+          echo "frontend-sha=$(git rev-parse HEAD:dist)" >> $GITHUB_OUTPUT
+
+      - name: Upload frontend artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: frontend-dist
+          path: dist/
+          retention-days: 7
+
+  # 跨平台构建
+  build-cross-platform:
+    name: Build for ${{ matrix.platform }} (${{ matrix.arch }})
+    needs: build-frontend
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux
+          - os: ubuntu-latest
+            platform: linux
+            arch: x64
+            target: x86_64-unknown-linux-gnu
+            artifact-name: reeftotem-assistant-linux-x64
+            file-pattern: "**/*.deb,**/*.rpm,**/*.AppImage"
+
+          # Windows
+          - os: windows-latest
+            platform: windows
+            arch: x64
+            target: x86_64-pc-windows-msvc
+            artifact-name: reeftotem-assistant-windows-x64
+            file-pattern: "**/*.exe,**/*.msi"
+
+          # macOS Intel
+          - os: macos-13
+            platform: macos
+            arch: x64
+            target: x86_64-apple-darwin
+            artifact-name: reeftotem-assistant-macos-x64
+            file-pattern: "**/*.dmg,**/*.tar.gz"
+
+          # macOS Apple Silicon
+          - os: macos-14
+            platform: macos
+            arch: arm64
+            target: aarch64-apple-darwin
+            artifact-name: reeftotem-assistant-macos-arm64
+            file-pattern: "**/*.dmg,**/*.tar.gz"
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+          targets: ${{ matrix.target }}
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 8
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Download frontend artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: frontend-dist
+          path: dist/
+
+      - name: Cache cargo registry
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target/
+          key: ${{ runner.os }}-${{ matrix.arch }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ matrix.arch }}-cargo-
+
+      - name: Install platform dependencies (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libgtk-3-dev \
+            libwebkit2gtk-4.0-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libgstreamer1.0-dev \
+            libgstreamer-plugins-base1.0-dev
+
+      - name: Setup macOS certificates
+        if: matrix.platform == 'macos'
+        run: |
+          # 创建临时钥匙串
+          security create-keychain -p ${{ secrets.MACOS_KEYCHAIN_PASSWORD }} build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p ${{ secrets.MACOS_KEYCHAIN_PASSWORD }} build.keychain
+
+          # 导入证书
+          echo "${{ secrets.MACOS_SIGNING_CERT }}" | base64 -d > certificate.p12
+          security import certificate.p12 -k build.keychain -P ${{ secrets.MACOS_CERT_PASSWORD }} -T /usr/bin/codesign
+
+          # 设置签名权限
+          security set-key-partition-list -S apple-tool:,apple: -s -k ${{ secrets.MACOS_KEYCHAIN_PASSWORD }} build.keychain
+
+      - name: Setup Windows certificates
+        if: matrix.platform == 'windows'
+        run: |
+          # 导入代码签名证书
+          echo "${{ secrets.WINDOWS_SIGNING_CERT }}" | base64 -d > certificate.pfx
+          certutil -f -p "${{ secrets.WINDOWS_CERT_PASSWORD }}" -importpfx certificate.pfx
+
+      - name: Build Tauri application
+        id: build
+        run: |
+          pnpm tauri build --target ${{ matrix.target }}
+        env:
+          TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
+          TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
+          # 环境变量（用于构建）
+          VITE_APP_VERSION: ${{ github.ref_name }}
+          VITE_BUILD_NUMBER: ${{ github.run_number }}
+
+      - name: Sign macOS application
+        if: matrix.platform == 'macos'
+        run: |
+          # 查找构建产物
+          BUNDLE_PATH=$(find src-tauri/target/${{ matrix.target }}/release/bundle -name "*.app" -o -name "*.dmg" | head -1)
+
+          if [[ $BUNDLE_PATH == *.app ]]; then
+            # 签名应用程序
+            codesign --force --deep --sign "${{ secrets.MACOS_SIGNING_IDENTITY }}" "$BUNDLE_PATH"
+
+            # 公证（如果可用）
+            if [ -n "${{ secrets.MACOS_NOTARY_API_KEY }}" ]; then
+              xcrun notarytool submit "$BUNDLE_PATH" --key "$HOME/notary-api-key.p8" --key-id "${{ secrets.MACOS_NOTARY_KEY_ID }}" --issuer "${{ secrets.MACOS_NOTARY_ISSUER_ID }}" --wait
+              xcrun stapler staple "$BUNDLE_PATH"
+            fi
+          fi
+
+      - name: Sign Windows application
+        if: matrix.platform == 'windows'
+        run: |
+          # 查找构建产物
+          BUNDLE_PATH=$(find src-tauri/target/${{ matrix.target }}/release/bundle -name "*.exe" -o -name "*.msi" | head -1)
+
+          if [ -n "$BUNDLE_PATH" ]; then
+            # 使用 signtool 签名
+            signtool sign /f certificate.pfx /p "${{ secrets.WINDOWS_CERT_PASSWORD }}" /t http://timestamp.digicert.com "$BUNDLE_PATH"
+          fi
+
+      - name: Create checksums
+        run: |
+          cd src-tauri/target/${{ matrix.target }}/release/bundle
+          find . -name ${{ matrix.file-pattern }} -type f -exec sha256sum {} \; > checksums.txt
+          find . -name ${{ matrix.file-pattern }} -type f -exec sha512sum {} \; > checksums-sha512.txt
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: ${{ matrix.artifact-name }}
+          path: |
+            src-tauri/target/${{ matrix.target }}/release/bundle/${{ matrix.file-pattern }}
+            src-tauri/target/${{ matrix.target }}/release/bundle/checksums*.txt
+          retention-days: 30
+
+      - name: Get build info
+        id: info
+        run: |
+          echo "build-time=$(date -u +"%Y-%m-%dT%H:%M:%SZ")" >> $GITHUB_OUTPUT
+          echo "git-sha=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
+          echo "git-tag=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+
+  # 创建 GitHub Release
+  create-release:
+    name: Create Release
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    needs: [build-frontend, build-cross-platform]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get version
+        id: version
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/}
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "is-prerelease=$(echo $VERSION | grep -E '\-(alpha|beta|rc)' && echo 'true' || echo 'false')" >> $GITHUB_OUTPUT
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          # 获取上一个标签
+          PREVIOUS_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+
+          if [ -n "$PREVIOUS_TAG" ]; then
+            # 生成变更日志
+            CHANGELOG=$(git log --pretty=format:"- %s (%h)" $PREVIOUS_TAG..HEAD)
+          else
+            CHANGELOG="- Initial release"
+          fi
+
+          # 保存到文件
+          echo "$CHANGELOG" > CHANGELOG.md
+          echo "changelog<<EOF" >> $GITHUB_OUTPUT
+          echo "$CHANGELOG" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v3
+        with:
+          path: artifacts/
+
+      - name: Create release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.version.outputs.version }}
+          name: Reeftotem Assistant ${{ steps.version.outputs.version }}
+          body: |
+            ## 🎉 Release ${{ steps.version.outputs.version }}
+
+            ${{ steps.changelog.outputs.changelog }}
+
+            ### 📦 下载说明
+
+            #### Windows
+            - `.exe`: 标准安装程序
+            - `.msi`: Windows Installer 安装包
+
+            #### macOS
+            - `.dmg`: macOS 磁盘映像（推荐）
+            - `.tar.gz`: 压缩包版本
+
+            #### Linux
+            - `.deb`: Debian/Ubuntu 安装包
+            - `.rpm`: Red Hat/Fedora 安装包
+            - `.AppImage`: 便携式应用
+
+            ### 🔐 完整性校验
+            每个下载包都包含 SHA256 和 SHA512 校验和文件，请验证下载完整性：
+            ```bash
+            sha256sum -c checksums.txt
+            ```
+
+            ### 🔑 签名信息
+            - **Windows**: 使用 DigiCert 代码签名证书签名
+            - **macOS**: 使用 Apple Developer ID 签名并通过公证
+            - **Linux**: 包管理器验证
+
+            ---
+
+            *此版本由 GitHub Actions 自动构建和发布*
+
+          files: |
+            artifacts/**/*.exe
+            artifacts/**/*.msi
+            artifacts/**/*.dmg
+            artifacts/**/*.tar.gz
+            artifacts/**/*.deb
+            artifacts/**/*.rpm
+            artifacts/**/*.AppImage
+            artifacts/**/checksums*.txt
+          draft: false
+          prerelease: ${{ steps.version.outputs.is-prerelease }}
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # 构建状态通知
+  notify:
+    name: Notify Build Status
+    if: always()
+    needs: [build-frontend, build-cross-platform, create-release]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Get build status
+        id: status
+        run: |
+          if [ "${{ needs.create-release.result }}" == "success" ]; then
+            echo "status=success" >> $GITHUB_OUTPUT
+            echo "message=✅ Build and release completed successfully" >> $GITHUB_OUTPUT
+          elif [ "${{ needs.build-cross-platform.result }}" == "failure" ]; then
+            echo "status=failure" >> $GITHUB_OUTPUT
+            echo "message=❌ Build failed" >> $GITHUB_OUTPUT
+          else
+            echo "status=partial" >> $GITHUB_OUTPUT
+            echo "message=⚠️ Build completed with some issues" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Send notification (Slack)
+        if: secrets.SLACK_WEBHOOK_URL != ''
+        run: |
+          curl -X POST -H 'Content-type: application/json' \
+            --data '{"text":"${{ steps.status.outputs.message }}\nRepository: ${{ github.repository }}\nVersion: ${{ github.ref_name }}\nBuild: ${{ github.workflow }} #${{ github.run_number }}"}' \
+            ${{ secrets.SLACK_WEBHOOK_URL }}
+
+      - name: Send notification (Discord)
+        if: secrets.DISCORD_WEBHOOK_URL != ''
+        run: |
+          curl -X POST -H 'Content-type: application/json' \
+            --data '{"content":"${{ steps.status.outputs.message }}\n**Repository:** ${{ github.repository }}\n**Version:** ${{ github.ref_name }}\n**Build:** ${{ github.workflow }} #${{ github.run_number }}"}' \
+            ${{ secrets.DISCORD_WEBHOOK_URL }}

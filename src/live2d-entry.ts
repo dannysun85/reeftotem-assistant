@@ -2,84 +2,97 @@ import React from "react";
 import ReactDOMClient from "react-dom/client";
 import { Live2DWindow } from "./pages/Live2DWindow";
 import "./index.css";
+import { createLogger, initializeLogger } from "./utils/Logger";
+import { getLive2DCorePath } from "./utils/tauriPathUtils";
+
+initializeLogger('live2d-entry');
+const logger = createLogger('live2d-entry');
 
 // ✅ 导入 Tauri API Shim - 确保 Tauri API 正确初始化
 import "./tauri-shim";
 
-// 导入LAppDelegate用于测试
+// 导入 LAppDelegate 用于暴露到全局
 import { LAppDelegate } from "./lib/live2d/src/lappdelegate";
 
-// 导入路径工具
-import { getLive2DCorePath } from "./utils/tauriPathUtils";
-
-// 预加载Live2D Core WebAssembly模块
+// 预加载 Live2D Core
 async function loadLive2DCore(): Promise<void> {
-    try {
-        // 首先检查Live2DCubismCore是否已经存在
+  if ((window as any).Live2DCubismCore) {
+    logger.info('Live2D Core 已存在');
+    return;
+  }
+
+  const candidatePaths = [
+    getLive2DCorePath(),
+    '/src/lib/live2d/Core/live2dcubismcore.min.js',
+    '/src/lib/live2d/Core/live2dcubismcore.js'
+  ];
+
+  const loadScript = (src: string) => new Promise<void>((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = src;
+    script.type = 'text/javascript';
+    script.async = false;
+
+    script.onload = () => {
+      setTimeout(() => {
         if ((window as any).Live2DCubismCore) {
-            return;
+          logger.info('Live2D Core 加载成功', { src });
+          resolve();
+        } else {
+          reject(new Error(`Live2D Core 脚本已加载但全局变量缺失: ${src}`));
         }
+      }, 100);
+    };
 
-        // 动态加载Live2D Core - 使用统一的资源路径
-        const coreScript = document.createElement('script');
+    script.onerror = () => {
+      reject(new Error(`Live2D Core 脚本加载失败: ${src}`));
+    };
 
-        // 使用统一的路径处理函数
-        const corePath = getLive2DCorePath();
+    document.head.appendChild(script);
+  });
 
-        coreScript.src = corePath;
-        coreScript.type = 'text/javascript';
-        coreScript.async = false; // 同步加载确保顺序
-
-        return new Promise<void>((resolve, reject) => {
-            coreScript.onload = () => {
-                // 等待一小段时间确保全局变量设置完成
-                setTimeout(() => {
-                    if ((window as any).Live2DCubismCore) {
-                        resolve();
-                    } else {
-                        console.error('Live2DCubismCore not found after loading script');
-                        reject(new Error('Live2DCubismCore not available'));
-                    }
-                }, 100);
-            };
-            coreScript.onerror = (error) => {
-                console.error('Failed to load Live2D Core from:', corePath);
-                reject(error);
-            };
-            document.head.appendChild(coreScript);
-        });
+  let lastError: Error | null = null;
+  for (const src of candidatePaths) {
+    try {
+      logger.info('尝试加载 Live2D Core', { src });
+      await loadScript(src);
+      return;
     } catch (error) {
-        throw error;
+      lastError = error instanceof Error ? error : new Error(String(error));
+      logger.warn('Live2D Core 路径失败', { src, error: lastError.message });
     }
+  }
+
+  throw lastError ?? new Error('Live2D Core 加载失败');
 }
 
 // 初始化函数
 async function initializeLive2DApp() {
-    try {
-        await loadLive2DCore();
+  try {
+    await loadLive2DCore();
 
-        const root = document.getElementById("root");
+    const root = document.getElementById("root");
 
-        if (root) {
-            const reactRoot = ReactDOMClient.createRoot(root);
-            reactRoot.render(React.createElement(Live2DWindow));
-        } else {
-            console.error('Root element not found');
-        }
-    } catch (error) {
-        console.error("Live2D app initialization failed:", error);
+    if (root) {
+      const reactRoot = ReactDOMClient.createRoot(root);
+      reactRoot.render(React.createElement(Live2DWindow));
+    } else {
+      logger.error('Root element not found');
     }
+  } catch (error) {
+    logger.error("Live2D app initialization failed", error);
+  }
 }
 
-// 立即将LAppDelegate暴露到全局对象，确保在React渲染前可用
+// 立即将 LAppDelegate 暴露到全局对象，确保在 React 渲染前可用
 (window as any).LAppDelegate = LAppDelegate;
 
 // 开始初始化
 initializeLive2DApp().then(() => {
-    // 导入并暴露ParameterMapper
-    import('./utils/parameterMapper').then((module) => {
-        (window as any).ParameterMapper = module.default;
-    }).catch((error) => {
-        console.warn('ParameterMapper import failed:', error);
-    });
+  // 导入并暴露 ParameterMapper
+  import('./utils/parameterMapper').then((module) => {
+    (window as any).ParameterMapper = module.default;
+  }).catch((error) => {
+    logger.warn('ParameterMapper import failed', error);
+  });
 });

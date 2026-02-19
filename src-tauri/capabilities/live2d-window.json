@@ -5,6 +5,7 @@
   "permissions": [
     "core:event:allow-listen",
     "core:event:allow-unlisten",
+    "core:event:allow-emit",
     "core:window:allow-start-dragging",
     "core:window:allow-is-always-on-top",
     "core:window:allow-is-visible",
@@ -14,6 +15,36 @@
     "core:window:allow-set-size",
     "core:window:allow-set-always-on-top",
     "core:default",
-    "core:app:default"
-  ]
+    "core:app:default",
+    "core:webview:allow-webview-position",
+    "core:webview:allow-webview-size",
+    "core:webview:allow-print",
+    "core:webview:allow-webview-close",
+    "core:webview:allow-set-webview-zoom",
+    "core:webview:allow-set-webview-focus",
+    "core:webview:allow-clear-all-browsing-data",
+    "core:webview:allow-reparent",
+    "core:webview:allow-internal-toggle-devtools"
+  ],
+  "scope": {
+    "allow": [
+      {
+        "window": "live2d",
+        "resources": [
+          "**/assets/live2d/**",
+          "**/live2d/**",
+          "**/*.js",
+          "**/*.wasm",
+          "**/*.json",
+          "**/*.png",
+          "**/*.moc3",
+          "**/*.model3.json",
+          "**/*.physics3.json",
+          "**/*.pose3.json",
+          "**/*.exp3.json",
+          "**/*.motion3.json"
+        ]
+      }
+    ]
+  }
 }

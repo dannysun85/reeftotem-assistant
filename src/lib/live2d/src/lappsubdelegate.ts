@@ -56,52 +56,37 @@ export class LAppSubdelegate {
    * APPに必要な物を初期化する。
    */
   public initialize(canvas: HTMLCanvasElement): boolean {
-    console.log('LAppSubdelegate: 开始初始化Canvas管理器');
-    console.log('LAppSubdelegate: Canvas元素:', canvas);
-
     if (!this._glManager.initialize(canvas)) {
       console.error('LAppSubdelegate: WebGL管理器初始化失败');
       return false;
     }
 
-    console.log('LAppSubdelegate: WebGL管理器初始化成功');
     this._canvas = canvas;
 
     if (LAppDefine.CanvasSize === 'auto') {
-      console.log('LAppSubdelegate: 使用自动Canvas尺寸');
       this.resizeCanvas();
     } else {
-      console.log('LAppSubdelegate: 使用固定Canvas尺寸:', LAppDefine.CanvasSize);
       canvas.width = LAppDefine.CanvasSize.width;
       canvas.height = LAppDefine.CanvasSize.height;
     }
 
-    console.log('LAppSubdelegate: 最终Canvas尺寸:', canvas.width, 'x', canvas.height);
-
     this._textureManager.setGlManager(this._glManager);
 
     const gl = this._glManager.getGl();
-    console.log('LAppSubdelegate: 获取WebGL上下文成功:', !!gl);
 
     if (!this._frameBuffer) {
       this._frameBuffer = gl.getParameter(gl.FRAMEBUFFER_BINDING);
-      console.log('LAppSubdelegate: 设置帧缓冲区');
     }
 
     // 透過設定
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
-    console.log('LAppSubdelegate: 设置透明混合模式');
 
     // AppViewの初期化
-    console.log('LAppSubdelegate: 开始初始化视图');
     this._view.initialize(this);
     this._view.initializeSprite();
-    console.log('LAppSubdelegate: 视图初始化完成');
 
-    console.log('LAppSubdelegate: 开始初始化Live2D管理器');
     this._live2dManager.initialize(this);
-    console.log('LAppSubdelegate: Live2D管理器初始化完成');
 
     // 设置尺寸观察器
     this._resizeObserver = new ResizeObserver(
@@ -109,9 +94,10 @@ export class LAppSubdelegate {
         this.resizeObserverCallback.call(this, entries, observer)
     );
     this._resizeObserver.observe(this._canvas);
-    console.log('LAppSubdelegate: Canvas尺寸观察器已设置');
 
-    console.log('LAppSubdelegate: 初始化完成');
+    if (LAppDefine.DebugLogEnable) {
+      console.log('LAppSubdelegate: 初始化完成');
+    }
     return true;
   }
 
@@ -150,7 +136,6 @@ export class LAppSubdelegate {
 
     // キャンバスのサイズが変わっている場合はリサイズに必要な処理をする。
     if (this._needResize) {
-      console.log('LAppSubdelegate.update: 处理Canvas尺寸变化');
       this.onResize();
       this._needResize = false;
     }
@@ -185,7 +170,6 @@ export class LAppSubdelegate {
    * シェーダーを登録する。
    */
   public createShader(): WebGLProgram | null {
-    console.log('LAppSubdelegate.createShader: 开始创建着色器程序');
     const gl = this._glManager.getGl();
     if (!gl) {
       console.error('LAppSubdelegate.createShader: WebGL上下文不可用');
@@ -193,7 +177,6 @@ export class LAppSubdelegate {
     }
 
     // バーテックスシェーダーのコンパイル
-    console.log('LAppSubdelegate.createShader: 创建顶点着色器');
     const vertexShaderId = gl.createShader(gl.VERTEX_SHADER);
 
     if (vertexShaderId == null) {
@@ -222,10 +205,8 @@ export class LAppSubdelegate {
       gl.deleteShader(vertexShaderId);
       return null;
     }
-    console.log('LAppSubdelegate.createShader: 顶点着色器编译成功');
 
     // フラグメントシェーダのコンパイル
-    console.log('LAppSubdelegate.createShader: 创建片段着色器');
     const fragmentShaderId = gl.createShader(gl.FRAGMENT_SHADER);
 
     if (fragmentShaderId == null) {
@@ -254,10 +235,8 @@ export class LAppSubdelegate {
       gl.deleteShader(fragmentShaderId);
       return null;
     }
-    console.log('LAppSubdelegate.createShader: 片段着色器编译成功');
 
     // プログラムオブジェクトの作成
-    console.log('LAppSubdelegate.createShader: 创建着色器程序');
     const programId = gl.createProgram();
     if (!programId) {
       console.error('LAppSubdelegate.createShader: 着色器程序创建失败');
@@ -273,7 +252,6 @@ export class LAppSubdelegate {
     gl.deleteShader(fragmentShaderId);
 
     // リンク
-    console.log('LAppSubdelegate.createShader: 链接着色器程序');
     gl.linkProgram(programId);
 
     // 检查链接状态
@@ -284,11 +262,8 @@ export class LAppSubdelegate {
       return null;
     }
 
-    console.log('LAppSubdelegate.createShader: 着色器程序链接成功');
-
     try {
       gl.useProgram(programId);
-      console.log('LAppSubdelegate.createShader: 着色器程序使用成功');
     } catch (error) {
       console.error('LAppSubdelegate.createShader: 使用着色器程序失败:', error);
       gl.deleteProgram(programId);

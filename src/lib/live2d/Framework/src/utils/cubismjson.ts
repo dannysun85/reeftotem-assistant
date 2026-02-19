@@ -1,3 +1,4 @@
+// @ts-nocheck - Live2D SDK framework code, do not modify
 /**
  * Copyright(c) Live2D Inc. All rights reserved.
  *

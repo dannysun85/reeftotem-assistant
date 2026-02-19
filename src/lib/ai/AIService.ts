@@ -47,6 +47,7 @@ export class AIService {
 
     let config: AIModelConfig = {
       provider,
+      model: 'default',
       temperature: parseFloat(import.meta.env.VITE_AI_TEMPERATURE || '0.7'),
       maxTokens: parseInt(import.meta.env.VITE_AI_MAX_TOKENS || '1000'),
       systemPrompt: `你是Reeftotem Assistant，一个可爱、友善、智能的AI助手。你的特点：

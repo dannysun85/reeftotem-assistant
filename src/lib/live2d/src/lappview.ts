@@ -9,10 +9,7 @@ import { CubismMatrix44 } from '../Framework/src/math/cubismmatrix44';
 import { CubismViewMatrix } from '../Framework/src/math/cubismviewmatrix';
 
 import * as LAppDefine from './lappdefine';
-import { LAppDelegate } from './lappdelegate';
 import { LAppPal } from './lapppal';
-import { LAppSprite } from './lappsprite';
-import { TextureInfo } from './lapptexturemanager';
 import { TouchManager } from './touchmanager';
 import { LAppSubdelegate } from './lappsubdelegate';
 
@@ -25,8 +22,6 @@ export class LAppView {
    */
   public constructor() {
     this._programId = null;
-    // this._back = null;
-    // this._gear = null;
 
     // タッチ関係のイベント管理
     this._touchManager = new TouchManager();
@@ -42,11 +37,8 @@ export class LAppView {
    * 初期化する。
    */
   public initialize(subdelegate: LAppSubdelegate): void {
-    console.log('LAppView: 开始初始化视图');
     this._subdelegate = subdelegate;
     const { width, height } = subdelegate.getCanvas();
-    console.log('LAppView: Canvas尺寸:', width, 'x', height);
-    console.log('LAppView: 初始化视图完成，准备初始化Sprite');
 
     const ratio: number = width / height;
     const left: number = -ratio;
@@ -88,12 +80,6 @@ export class LAppView {
     this._touchManager = null;
     this._deviceToScreen = null;
 
-    // this._gear.release();
-    // this._gear = null;
-
-    // this._back.release();
-    // this._back = null;
-
     this._subdelegate.getGlManager().getGl().deleteProgram(this._programId);
     this._programId = null;
   }
@@ -115,20 +101,11 @@ export class LAppView {
 
     try {
       gl.useProgram(this._programId);
-      // 移除每帧日志: console.log('LAppView.render: 使用着色器程序');
-
-      // if (this._back) {
-      //   this._back.render(this._programId);
-      // }
-      // if (this._gear) {
-      //   this._gear.render(this._programId);
-      // }
 
       gl.flush();
 
       const lapplive2dmanager = this._subdelegate.getLive2DManager();
       if (lapplive2dmanager != null) {
-        // 移除每帧日志: console.log('LAppView.render: 更新Live2D管理器');
         lapplive2dmanager.setViewMatrix(this._viewMatrix);
         lapplive2dmanager.onUpdate();
       } else {
@@ -143,53 +120,6 @@ export class LAppView {
    * 画像の初期化を行う。
    */
   public initializeSprite(): void {
-    console.log('LAppView: 开始初始化Sprite');
-    const width: number = this._subdelegate.getCanvas().width;
-    const height: number = this._subdelegate.getCanvas().height;
-    const textureManager = this._subdelegate.getTextureManager();
-    console.log('LAppView: Sprite尺寸:', width, 'x', height);
-    console.log('LAppView: TextureManager:', !!textureManager);
-    // const resourcesPath = LAppDefine.ResourcesPath;
-
-    // let imageName = '';
-
-    // 背景画像初期化
-    // imageName = LAppDefine.BackImageName;
-
-    // 非同期なのでコールバック関数を作成
-    // const initBackGroundTexture = (textureInfo: TextureInfo): void => {
-    //   const x: number = width * 0.5;
-    //   const y: number = height * 0.5;
-
-    //   const fwidth = textureInfo.width * 2.0;
-    //   const fheight = height * 0.95;
-    //   this._back = new LAppSprite(x, y, fwidth, fheight, textureInfo.id);
-    //   this._back.setSubdelegate(this._subdelegate);
-    // };
-
-    // textureManager.createTextureFromPngFile(
-    //   resourcesPath + imageName,
-    //   false,
-    //   initBackGroundTexture
-    // );
-
-    // 歯車画像初期化
-    // imageName = LAppDefine.GearImageName;
-    // const initGearTexture = (textureInfo: TextureInfo): void => {
-    //   const x = width - textureInfo.width * 0.5;
-    //   const y = height - textureInfo.height * 0.5;
-    //   const fwidth = textureInfo.width;
-    //   const fheight = textureInfo.height;
-    //   this._gear = new LAppSprite(x, y, fwidth, fheight, textureInfo.id);
-    //   this._gear.setSubdelegate(this._subdelegate);
-    // };
-
-    // textureManager.createTextureFromPngFile(
-    //   resourcesPath + imageName,
-    //   false,
-    //   initGearTexture
-    // );
-
     // シェーダーを作成
     if (this._programId == null) {
       this._programId = this._subdelegate.createShader();
@@ -197,7 +127,6 @@ export class LAppView {
         console.error('LAppView.initializeSprite: 着色器创建失败');
         return;
       }
-      console.log('LAppView.initializeSprite: 着色器创建成功');
     }
   }
 
@@ -258,10 +187,6 @@ export class LAppView {
     }
     lapplive2dmanager.onTap(x, y);
 
-    // 歯車にタップしたか
-    // if (this._gear.isHit(posX, posY)) {
-    //   lapplive2dmanager.nextScene();
-    // }
   }
 
   /**
@@ -305,8 +230,6 @@ export class LAppView {
   _deviceToScreen: CubismMatrix44; // デバイスからスクリーンへの行列
   _viewMatrix: CubismViewMatrix; // viewMatrix
   _programId: WebGLProgram | null; // シェーダID
-  // _back: LAppSprite; // 背景画像
-  // _gear: LAppSprite; // ギア画像
   _changeModel: boolean; // モデル切り替えフラグ
   _isClick: boolean; // クリック中
   private _subdelegate: LAppSubdelegate;

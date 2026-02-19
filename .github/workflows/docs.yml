@@ -1,0 +1,159 @@
+name: Documentation
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'docs/**'
+      - '**/*.md'
+      - 'CLAUDE.md'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'docs/**'
+      - '**/*.md'
+      - 'CLAUDE.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  # 构建文档
+  build-docs:
+    name: Build Documentation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 8
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Setup Python for docs generation
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install Python dependencies
+        run: |
+          pip install mkdocs mkdocs-material mkdocs-git-revision-date-localized-plugin \
+                     mkdocs-git-committers-plugin-2 mkdocs-redirects mkdocs-minify-plugin
+
+      - name: Generate API documentation
+        run: |
+          # 生成 TypeScript API 文档
+          pnpm run docs:api || echo "API docs generation skipped"
+
+          # 生成 Rust 文档
+          cd src-tauri
+          cargo doc --no-deps --all-features
+          cd ..
+
+          # 复制文档到 docs 目录
+          mkdir -p docs/api/rust
+          cp -r src-tauri/target/doc/* docs/api/rust/
+
+      - name: Build MkDocs site
+        run: |
+          mkdocs build --strict --verbose
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v3
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v2
+        with:
+          path: ./site
+
+  # 部署到 GitHub Pages
+  deploy-docs:
+    name: Deploy Documentation
+    if: github.ref == 'refs/heads/main'
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: build-docs
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v2
+
+  # 文档质量检查
+  docs-quality:
+    name: Documentation Quality Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 8
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Check markdown links
+        run: |
+          # 安装 markdown link checker
+          npm install -g markdown-link-check
+
+          # 检查所有 markdown 文件中的链接
+          find . -name "*.md" -not -path "./node_modules/*" -not -path "./.git/*" | \
+          xargs -I {} markdown-link-check {} -v
+
+      - name: Check markdown linting
+        run: |
+          # 安装 markdownlint
+          npm install -g markdownlint-cli2
+
+          # 运行 markdownlint
+          markdownlint-cli2 "**/*.md" "#node_modules" "#.git"
+
+      - name: Check spelling
+        run: |
+          # 安装拼写检查工具
+          npm install -g cspell
+
+          # 检查拼写
+          cspell "**/*.md" --config .cspell.json
+
+      - name: Validate documentation structure
+        run: |
+          # 检查文档结构
+          node .github/scripts/validate-docs.js
+
+      - name: Generate documentation metrics
+        run: |
+          # 统计文档指标
+          echo "## Documentation Metrics" >> $GITHUB_STEP_SUMMARY
+          echo "| Metric | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Total Markdown files | $(find . -name "*.md" -not -path "./node_modules/*" | wc -l) |" >> $GITHUB_STEP_SUMMARY
+          echo "| Total words | $(find . -name "*.md" -not -path "./node_modules/*" -exec wc -w {} + | tail -1 | awk '{print $1}') |" >> $GITHUB_STEP_SUMMARY
+          echo "| Documentation coverage | $(find docs -name "*.md" | wc -l) files in docs/ |" >> $GITHUB_STEP_SUMMARY

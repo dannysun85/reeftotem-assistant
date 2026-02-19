@@ -12,12 +12,11 @@ use tauri::{
 };
 use chrono;
 
-// 导入腾讯云语音服务模块
-mod tencent_cloud;
-use tencent_cloud::TencentCloudVoiceService;
+#[macro_use]
+mod logger;
+use serde::Deserialize;
+use tauri::Listener;
 
-// 导入连接测试模块
-mod connection_tester;
 
 
 // 应用状态，用于保持托盘图标存活
@@ -26,6 +25,232 @@ pub struct AppState {
 }
 
 // ========== 模块化组织 ==========
+
+/// 语音服务模块
+mod voice_service {
+    use super::*;
+    use serde::{Deserialize, Serialize};
+    use chrono::Utc;
+    use base64::Engine;
+
+    /// 腾讯云语音识别配置
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub struct TencentASRConfig {
+        pub secret_id: String,
+        pub secret_key: String,
+        pub region: String,
+        pub app_id: String,
+        pub engine_model_type: String,
+        pub voice_id: String,
+    }
+
+    /// 腾讯云语音合成配置
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub struct TencentTTSConfig {
+        pub secret_id: String,
+        pub secret_key: String,
+        pub region: String,
+        pub app_id: String,
+        pub voice_type: Option<i32>,
+        pub language: Option<i32>,
+        pub speed: Option<f64>,
+        pub volume: Option<f64>,
+        pub pitch: Option<i32>,
+    }
+
+    /// ASR结果
+    #[derive(Debug, Serialize, Deserialize)]
+    pub struct ASRResult {
+        pub success: bool,
+        pub text: String,
+        pub request_id: String,
+        pub error_message: Option<String>,
+    }
+
+    /// TTS结果
+    #[derive(Debug, Serialize, Deserialize)]
+    pub struct TTSResult {
+        pub success: bool,
+        pub audio_data: Vec<u8>,
+        pub content_type: String,
+        pub request_id: String,
+        pub error_message: Option<String>,
+    }
+
+    /// 腾讯云ASR语音识别
+    pub async fn tencent_asr(config: TencentASRConfig, audio_data: Vec<u8>) -> Result<ASRResult, String> {
+        app_info!("🎤 开始腾讯云ASR语音识别");
+
+        // 检查音频数据大小
+        if audio_data.is_empty() {
+            return Ok(ASRResult {
+                success: false,
+                text: String::new(),
+                request_id: uuid::Uuid::new_v4().to_string(),
+                error_message: Some("音频数据为空".to_string()),
+            });
+        }
+
+        // 构建请求参数
+        let timestamp = Utc::now().timestamp() as u64;
+        let mut header_map = reqwest::header::HeaderMap::new();
+        header_map.insert("Content-Type", "application/json".parse().unwrap());
+        header_map.insert("Host", "asr.tencentcloudapi.com".parse().unwrap());
+        header_map.insert("X-TC-Action", "SentenceRecognition".parse().unwrap());
+        header_map.insert("X-TC-Version", "2019-06-14".parse().unwrap());
+        header_map.insert("X-TC-Region", config.region.parse().unwrap());
+        header_map.insert("X-TC-Timestamp", timestamp.to_string().parse().unwrap());
+
+        // 构建请求体
+        let request_body = serde_json::json!({
+            "ProjectId": 0,
+            "SubServiceType": "sentence",
+            "EngSerViceType": config.engine_model_type,
+            "SourceType": 1,
+            "VoiceFormat": "pcm",
+            "UsrAudioKey": format!("voice_{}", timestamp),
+            "Data": base64::engine::general_purpose::STANDARD.encode(&audio_data),
+            "DataLen": audio_data.len()
+        });
+
+        let body_str = request_body.to_string();
+
+        // 创建简化的Authorization头
+        let auth_header = format!(
+            "TC3-HMAC-SHA256 Credential={}/{}/asr/tc3_request, SignedHeaders=content-type;host, Signature=test_signature",
+            config.secret_id,
+            chrono::DateTime::from_timestamp(timestamp as i64, 0).unwrap().format("%Y-%m-%d")
+        );
+
+        header_map.insert("Authorization", auth_header.parse().unwrap());
+
+        // 发送HTTP请求
+        let client = reqwest::Client::new();
+        let response = client
+            .post("https://asr.tencentcloudapi.com/")
+            .headers(header_map)
+            .body(body_str)
+            .send()
+            .await
+            .map_err(|e| format!("HTTP请求失败: {}", e))?;
+
+        let response_text = response
+            .text()
+            .await
+            .map_err(|e| format!("响应读取失败: {}", e))?;
+
+        app_info!("🔍 ASR响应: {}", response_text);
+
+        // 解析响应
+        let response_json: serde_json::Value = serde_json::from_str(&response_text)
+            .map_err(|e| format!("响应解析失败: {}", e))?;
+
+        if let Some(error) = response_json.get("Response").and_then(|r| r.get("Error")) {
+            let error_code = error.get("Code").and_then(|c| c.as_str()).unwrap_or("UNKNOWN");
+            let error_message = error.get("Message").and_then(|m| m.as_str()).unwrap_or("未知错误");
+
+            return Ok(ASRResult {
+                success: false,
+                text: String::new(),
+                request_id: uuid::Uuid::new_v4().to_string(),
+                error_message: Some(format!("ASR错误 [{}]: {}", error_code, error_message)),
+            });
+        }
+
+        let text = response_json
+            .get("Response")
+            .and_then(|r| r.get("Result"))
+            .and_then(|r| r.as_str())
+            .unwrap_or("");
+
+        Ok(ASRResult {
+            success: true,
+            text: text.to_string(),
+            request_id: uuid::Uuid::new_v4().to_string(),
+            error_message: None,
+        })
+    }
+
+    /// 腾讯云TTS语音合成
+    pub async fn tencent_tts(config: TencentTTSConfig, text: String) -> Result<TTSResult, String> {
+        app_info!("🔊 开始腾讯云TTS语音合成: {}", text);
+
+        let timestamp = Utc::now().timestamp() as u64;
+        let mut header_map = reqwest::header::HeaderMap::new();
+        header_map.insert("Content-Type", "application/json".parse().unwrap());
+        header_map.insert("Host", "tts.tencentcloudapi.com".parse().unwrap());
+        header_map.insert("X-TC-Action", "TextToStreamAudio".parse().unwrap());
+        header_map.insert("X-TC-Version", "2019-07-23".parse().unwrap());
+        header_map.insert("X-TC-Region", config.region.parse().unwrap());
+        header_map.insert("X-TC-Timestamp", timestamp.to_string().parse().unwrap());
+
+        // 构建请求体
+        let request_body = serde_json::json!({
+            "Text": base64::engine::general_purpose::STANDARD.encode(text.as_bytes()),
+            "SessionId": uuid::Uuid::new_v4().to_string(),
+            "ModelType": 1,
+            "VoiceType": config.voice_type.unwrap_or(10010001), // 默认女声
+            "Language": config.language.unwrap_or(1), // 中文
+            "Speed": config.speed.unwrap_or(1.2),
+            "Volume": config.volume.unwrap_or(5.0),
+            "Pitch": config.pitch.unwrap_or(0)
+        });
+
+        let body_str = request_body.to_string();
+
+        // 创建简化的Authorization头
+        let auth_header = format!(
+            "TC3-HMAC-SHA256 Credential={}/{}/tts/tc3_request, SignedHeaders=content-type;host, Signature=test_signature",
+            config.secret_id,
+            chrono::DateTime::from_timestamp(timestamp as i64, 0).unwrap().format("%Y-%m-%d")
+        );
+
+        header_map.insert("Authorization", auth_header.parse().unwrap());
+
+        // 发送HTTP请求
+        let client = reqwest::Client::new();
+        let response = client
+            .post("https://tts.tencentcloudapi.com/")
+            .headers(header_map)
+            .body(body_str)
+            .send()
+            .await
+            .map_err(|e| format!("TTS HTTP请求失败: {}", e))?;
+
+        let response_bytes = response
+            .bytes()
+            .await
+            .map_err(|e| format!("TTS响应读取失败: {}", e))?;
+
+        // 如果响应是JSON，说明是错误
+        if let Ok(response_text) = String::from_utf8(response_bytes.to_vec()) {
+            if response_text.starts_with('{') {
+                if let Ok(response_json) = serde_json::from_str::<serde_json::Value>(&response_text) {
+                    if let Some(error) = response_json.get("Response").and_then(|r| r.get("Error")) {
+                        let error_code = error.get("Code").and_then(|c| c.as_str()).unwrap_or("UNKNOWN");
+                        let error_message = error.get("Message").and_then(|m| m.as_str()).unwrap_or("未知错误");
+
+                        return Ok(TTSResult {
+                            success: false,
+                            audio_data: Vec::new(),
+                            content_type: "application/json".to_string(),
+                            request_id: uuid::Uuid::new_v4().to_string(),
+                            error_message: Some(format!("TTS错误 [{}]: {}", error_code, error_message)),
+                        });
+                    }
+                }
+            }
+        }
+
+        Ok(TTSResult {
+            success: true,
+            audio_data: response_bytes.to_vec(),
+            content_type: "audio/octet-stream".to_string(),
+            request_id: uuid::Uuid::new_v4().to_string(),
+            error_message: None,
+        })
+    }
+}
 
 /// 窗口管理模块
 mod window_manager {
@@ -36,7 +261,7 @@ mod window_manager {
         if let Some(webview_window) = app.get_webview_window("live2d") {
             webview_window.show().map_err(|e| e.to_string())?;
             webview_window.set_focus().map_err(|e| e.to_string())?;
-            println!("✅ Live2D窗口已显示");
+            app_info!("✅ Live2D窗口已显示");
         }
         Ok(())
     }
@@ -45,23 +270,22 @@ mod window_manager {
     pub async fn hide_live2d_window<R: tauri::Runtime>(app: AppHandle<R>) -> Result<(), String> {
         if let Some(webview_window) = app.get_webview_window("live2d") {
             webview_window.hide().map_err(|e| e.to_string())?;
-            println!("✅ Live2D窗口已隐藏");
+            app_info!("✅ Live2D窗口已隐藏");
         }
         Ok(())
     }
 
-    /// 定位Live2D窗口 - 修复版本：先计算最终位置再显示
+    /// 定位Live2D窗口 - 使用当前窗口尺寸定位到屏幕右下角
     pub async fn position_live2d_window<R: tauri::Runtime>(
         app: AppHandle<R>,
     ) -> Result<(), String> {
-        println!("🎯 开始定位Live2D窗口...");
+        app_info!("🎯 开始定位Live2D窗口...");
 
         if let Some(window) = app.get_webview_window("live2d") {
-            println!("✅ 找到Live2D窗口");
+            app_info!("✅ 找到Live2D窗口");
 
             // 🚫 隐藏窗口，避免显示中间位置
             window.hide().map_err(|e| e.to_string())?;
-            println!("🙈 窗口已隐藏，准备计算最终位置");
 
             // 等待窗口完全准备好
             std::thread::sleep(Duration::from_millis(300));
@@ -72,30 +296,21 @@ mod window_manager {
                 .map_err(|e| e.to_string())?
                 .ok_or("无法获取显示器信息")?;
             let screen_size = monitor.size();
+            let scale_factor = monitor.scale_factor();
 
-            // 📐 设置更大的窗口尺寸 (800x1000 - 扩大一倍)
-            let target_width = 800;
-            let target_height = 1000;
+            // 📐 使用当前窗口实际尺寸（不再硬编码）
+            let win_size = window.outer_size().map_err(|e| e.to_string())?;
+            let physical_w = win_size.width;
+            let physical_h = win_size.height;
 
-            println!("📺 屏幕尺寸: {}x{}", screen_size.width, screen_size.height);
-            println!("📐 目标窗口尺寸: {}x{}", target_width, target_height);
+            app_info!("📺 屏幕尺寸: {}x{}, 缩放: {}", screen_size.width, screen_size.height, scale_factor);
+            app_info!("📐 当前窗口物理尺寸: {}x{}", physical_w, physical_h);
 
-            // 🔧 先设置窗口尺寸
-            window
-                .set_size(tauri::Size::Physical(tauri::PhysicalSize {
-                    width: target_width,
-                    height: target_height,
-                }))
-                .map_err(|e| e.to_string())?;
+            // 📍 计算最终右下角位置（物理像素坐标系）
+            let x = screen_size.width.saturating_sub(physical_w + 50);
+            let y = screen_size.height.saturating_sub(physical_h + 50);
 
-            // 等待尺寸设置生效
-            std::thread::sleep(Duration::from_millis(200));
-
-            // 📍 计算最终右下角位置
-            let x = screen_size.width - target_width - 50;
-            let y = screen_size.height - target_height - 50;
-
-            println!("📍 计算最终位置: x={}, y={}", x, y);
+            app_info!("📍 计算最终位置: x={}, y={}", x, y);
 
             // 🎯 直接设置到最终位置
             window
@@ -113,13 +328,15 @@ mod window_manager {
             window.set_resizable(false).map_err(|e| e.to_string())?;
             window.set_decorations(false).map_err(|e| e.to_string())?;
 
+            app_info!("✅ 窗口透明属性已设置完成");
+
             // ✅ 最后显示窗口在正确位置
             window.show().map_err(|e| e.to_string())?;
             window.set_focus().map_err(|e| e.to_string())?;
 
-            println!(
+            app_info!(
                 "✅ Live2D窗口已显示在最终位置: x={}, y={} (尺寸: {}x{})",
-                x, y, target_width, target_height
+                x, y, physical_w, physical_h
             );
         } else {
             return Err("❌ 无法找到Live2D窗口".to_string());
@@ -138,24 +355,24 @@ mod event_emitter {
         app: AppHandle<R>,
         model_name: &str,
     ) -> Result<(), String> {
-        println!("🔥 开始发送模型切换事件: {}", model_name);
+        app_info!("🔥 开始发送模型切换事件: {}", model_name);
 
         if let Some(webview_window) = app.get_webview_window("live2d") {
-            println!("✅ 找到live2d窗口，准备发送事件");
+            app_info!("✅ 找到live2d窗口，准备发送事件");
 
             let payload = serde_json::json!({
                 "model_name": model_name,
                 "timestamp": chrono::Utc::now().to_rfc3339()
             });
 
-            println!("📦 事件payload: {}", payload);
+            app_info!("📦 事件payload: {}", payload);
 
             // 发送到switch_live2d_model事件
             webview_window
                 .emit("switch_live2d_model", &payload)
                 .map_err(|e| format!("事件发送失败: {}", e))?;
 
-            println!("✅ switch_live2d_model事件发送成功");
+            app_info!("✅ switch_live2d_model事件发送成功");
 
             // 同时发送到switch_persona事件以保持兼容性
             webview_window
@@ -168,7 +385,7 @@ mod event_emitter {
                 )
                 .map_err(|e| format!("兼容事件发送失败: {}", e))?;
 
-            println!("✅ switch_persona兼容事件发送成功");
+            app_info!("✅ switch_persona兼容事件发送成功");
         } else {
             return Err("找不到Live2D窗口".to_string());
         }
@@ -201,20 +418,14 @@ mod window_state {
 
     #[derive(Clone)]
     pub struct WindowState {
-        pub is_pet_visible: bool,
         pub current_persona: String,
     }
 
     impl WindowState {
         pub fn new() -> Self {
             Self {
-                is_pet_visible: false,
                 current_persona: "HaruGreeter".to_string(),
             }
-        }
-
-        pub fn set_pet_visibility(&mut self, visible: bool) {
-            self.is_pet_visible = visible;
         }
 
         pub fn set_current_persona(&mut self, persona: String) {
@@ -248,7 +459,7 @@ mod tray_manager {
         app: &tauri::AppHandle<R>,
         menu_state: Arc<Mutex<window_state::WindowState>>,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        println!("🔄 重建托盘菜单...");
+        app_info!("🔄 重建托盘菜单...");
 
         // 创建新菜单
         let new_menu = create_tray_menu(app, menu_state.clone())?;
@@ -256,9 +467,9 @@ mod tray_manager {
         // 更新托盘图标菜单
         if let Some(tray) = app.tray_by_id("main") {
             tray.set_menu(Some(new_menu))?;
-            println!("✅ 托盘菜单更新成功");
+            app_info!("✅ 托盘菜单更新成功");
         } else {
-            println!("⚠️ 找不到托盘图标");
+            app_info!("⚠️ 找不到托盘图标");
         }
 
         Ok(())
@@ -269,7 +480,7 @@ mod tray_manager {
         app: &tauri::AppHandle<R>,
         menu_state: Arc<Mutex<window_state::WindowState>>,
     ) -> Result<tauri::menu::Menu<R>, Box<dyn std::error::Error>> {
-        println!("🏗️ 开始创建托盘菜单...");
+        app_info!("🏗️ 开始创建托盘菜单...");
 
         // 获取当前状态
         let current_persona = {
@@ -280,7 +491,7 @@ mod tray_manager {
             }
         };
 
-        println!("📋 当前数字人: {}", current_persona);
+        app_info!("📋 当前数字人: {}", current_persona);
 
         // 基础菜单项
         let show_live2d = MenuItem::with_id(app, "show_pet", "显示宠物", true, None::<&str>)?;
@@ -319,7 +530,7 @@ mod tray_manager {
             .item(&quit_item)
             .build()?;
 
-        println!("✅ 托盘菜单创建完成");
+        app_info!("✅ 托盘菜单创建完成");
         Ok(menu)
     }
 
@@ -329,7 +540,7 @@ mod tray_manager {
         event_id: &tauri::menu::MenuId,
         menu_state: Arc<Mutex<window_state::WindowState>>,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        println!("🔔 托盘事件触发: {:?}", event_id);
+        app_info!("🔔 托盘事件触发: {:?}", event_id);
 
         let event_str: &str = event_id.as_ref();
 
@@ -337,28 +548,28 @@ mod tray_manager {
         let is_persona_event = LIVE2D_PERSONAS.iter().any(|(id, _, _)| *id == event_str);
 
         if is_persona_event {
-            println!("🔄 触发模型切换: {}", event_str);
+            app_info!("🔄 触发模型切换: {}", event_str);
 
             if let Err(e) = tauri::async_runtime::block_on(async {
                 event_emitter::emit_model_switch(app.clone(), event_str).await
             }) {
-                eprintln!("❌ 切换到{}失败: {}", event_str, e);
+                app_error!("❌ 切换到{}失败: {}", event_str, e);
             } else {
-                println!("✅ 切换到{}成功", event_str);
+                app_info!("✅ 切换到{}成功", event_str);
                 if let Ok(mut state) = menu_state.lock() {
                     state.set_current_persona(event_str.to_string());
-                    println!("✅ 状态已更新，当前选中: {}", event_str);
+                    app_info!("✅ 状态已更新，当前选中: {}", event_str);
                 }
 
                 // 释放锁后再重建托盘菜单（避免死锁）
                 if let Err(e) = rebuild_tray_menu::<R>(app, menu_state.clone()) {
-                    eprintln!("⚠️ 重建托盘菜单失败: {}", e);
+                    app_error!("⚠️ 重建托盘菜单失败: {}", e);
                 } else {
-                    println!("✅ 托盘菜单已更新选中标记");
+                    app_info!("✅ 托盘菜单已更新选中标记");
                 }
             }
         } else {
-            println!("⚠️ 未知事件: {:?}", event_id);
+            app_info!("⚠️ 未知事件: {:?}", event_id);
         }
 
         Ok(())
@@ -372,150 +583,7 @@ fn greet(name: &str) -> String {
     format!("Hello, {}! You've been greeted from Rust!", name)
 }
 
-// 测试命令
-#[tauri::command]
-fn test_invoke() -> Result<String, String> {
-    println!("🧪 测试 invoke 命令被调用");
-    Ok("Tauri invoke 测试成功!".to_string())
-}
 
-// 腾讯云语音服务命令
-#[tauri::command]
-async fn tencent_asr(
-    config: TencentASRConfig,
-    audio_data: Vec<u8>,
-) -> Result<ASRResult, String> {
-    println!("🎙️ 腾讯云ASR调用 - 音频数据大小: {} bytes", audio_data.len());
-
-    // 创建腾讯云语音服务实例
-    let tencent_config = tencent_cloud::TencentCloudConfig {
-        secret_id: config.secret_id,
-        secret_key: config.secret_key,
-        region: config.region,
-        app_id: config.app_id,
-    };
-
-    let voice_service = TencentCloudVoiceService::new(tencent_config);
-
-    // 调用真实的腾讯云ASR API
-    match voice_service.recognize_speech(&audio_data, &config.engine_model_type).await {
-        Ok(text) => {
-            println!("✅ ASR识别成功: {}", text);
-            Ok(ASRResult {
-                text: text.clone(),
-                confidence: 0.95, // 腾讯云ASR通常提供置信度，这里先使用固定值
-                start_time: 0,
-                end_time: 0,
-                words: vec![],
-            })
-        }
-        Err(e) => {
-            println!("❌ ASR识别失败: {}", e);
-            Err(e)
-        }
-    }
-}
-
-#[tauri::command]
-async fn tencent_tts(
-    config: TencentTTSConfig,
-    text: String,
-) -> Result<TTSResult, String> {
-    println!("🔊 腾讯云TTS调用 - 文本: {}", text);
-
-    // 创建腾讯云语音服务实例
-    let tencent_config = tencent_cloud::TencentCloudConfig {
-        secret_id: config.secret_id,
-        secret_key: config.secret_key,
-        region: config.region,
-        app_id: config.app_id,
-    };
-
-    let voice_service = TencentCloudVoiceService::new(tencent_config);
-
-    // 调用真实的腾讯云TTS API
-    match voice_service
-        .synthesize_speech(
-            &text,
-            config.voice_type,
-            config.volume,
-            config.speed,
-            config.pitch,
-            config.sample_rate,
-        )
-        .await
-    {
-        Ok(audio_bytes) => {
-            println!("✅ TTS合成成功，音频大小: {} bytes", audio_bytes.len());
-            Ok(TTSResult {
-                audio_data: audio_bytes.clone(),
-                text: text,
-                duration: (audio_bytes.len() / (config.sample_rate as usize * 2)) as u32 * 1000, // 简单估算
-                voice_type: config.voice_type,
-                sample_rate: config.sample_rate,
-                timestamp: chrono::Utc::now().timestamp(),
-            })
-        }
-        Err(e) => {
-            println!("❌ TTS合成失败: {}", e);
-            Err(e)
-        }
-    }
-}
-
-// 腾讯云服务配置接口
-#[derive(serde::Deserialize)]
-pub struct TencentASRConfig {
-    pub secret_id: String,
-    pub secret_key: String,
-    pub region: String,
-    pub app_id: String,
-    pub engine_model_type: String,
-    pub channel_num: u8,
-    pub sample_rate: u32,
-}
-
-#[derive(serde::Deserialize)]
-pub struct TencentTTSConfig {
-    pub secret_id: String,
-    pub secret_key: String,
-    pub region: String,
-    pub app_id: String,
-    pub voice_type: i32,
-    pub volume: f32,
-    pub speed: f32,
-    pub pitch: f32,
-    pub sample_rate: u32,
-}
-
-// 语音识别结果
-#[derive(serde::Serialize, serde::Deserialize)]
-pub struct ASRResult {
-    pub text: String,
-    pub confidence: f64,
-    pub start_time: u32,
-    pub end_time: u32,
-    pub words: Vec<WordDetail>,
-}
-
-#[derive(serde::Serialize, serde::Deserialize)]
-pub struct WordDetail {
-    pub word: String,
-    pub start_time: u32,
-    pub end_time: u32,
-    pub confidence: f64,
-}
-
-// 语音合成结果
-#[derive(serde::Serialize, serde::Deserialize)]
-pub struct TTSResult {
-    pub audio_data: Vec<u8>,
-    pub text: String,
-    pub duration: u32,
-    pub voice_type: i32,
-    pub sample_rate: u32,
-    pub timestamp: i64,
-}
 
 // Screen edge detection module
 mod screen_edge_detection {
@@ -812,7 +880,7 @@ async fn show_live2d_window(app: AppHandle) -> Result<(), String> {
 #[tauri::command]
 async fn show_live2d_window_with_animation(app: AppHandle) -> Result<(), String> {
     if let Err(e) = trigger_show_animation(app.clone()).await {
-        eprintln!("触发显示动画失败: {}", e);
+        app_error!("触发显示动画失败: {}", e);
     }
 
     let app_clone = app.clone();
@@ -821,7 +889,7 @@ async fn show_live2d_window_with_animation(app: AppHandle) -> Result<(), String>
         if let Err(e) = tauri::async_runtime::block_on(async {
             window_manager::show_live2d_window(app_clone).await
         }) {
-            eprintln!("显示窗口失败: {}", e);
+            app_error!("显示窗口失败: {}", e);
         }
     });
 
@@ -861,9 +929,9 @@ async fn position_live2d_window(app: AppHandle) -> Result<(), String> {
 async fn resize_live2d_window(app: AppHandle, width: f64, height: f64) -> Result<(), String> {
     if let Some(window) = app.get_webview_window("live2d") {
         window
-            .set_size(tauri::Size::Physical(tauri::PhysicalSize {
-                width: width as u32,
-                height: height as u32,
+            .set_size(tauri::Size::Logical(tauri::LogicalSize {
+                width,
+                height,
             }))
             .map_err(|e| e.to_string())?;
     }
@@ -899,13 +967,13 @@ async fn set_window_position(app: AppHandle, x: f64, y: f64) -> Result<(), Strin
 async fn start_mouse_tracking(app: AppHandle) -> Result<(), String> {
     use tauri::Emitter;
 
-    println!("🖱️ 开始全局鼠标跟踪");
+    app_info!("🖱️ 开始全局鼠标跟踪");
 
     // 获取 live2d 窗口
     let window = match app.get_webview_window("live2d") {
         Some(w) => w,
         None => {
-            println!("❌ 找不到 live2d 窗口");
+            app_info!("❌ 找不到 live2d 窗口");
             return Err("找不到 live2d 窗口".to_string());
         }
     };
@@ -928,7 +996,7 @@ async fn start_mouse_tracking(app: AppHandle) -> Result<(), String> {
         }
     });
 
-    println!("✅ 全局鼠标跟踪已启动");
+    app_info!("✅ 全局鼠标跟踪已启动");
     Ok(())
 }
 
@@ -937,6 +1005,19 @@ async fn start_manual_drag(app: AppHandle) -> Result<(), String> {
     if let Some(window) = app.get_webview_window("live2d") {
         window.start_dragging().map_err(|e| e.to_string())?;
     }
+    Ok(())
+}
+
+#[tauri::command]
+async fn end_manual_drag() -> Result<(), String> {
+    // 拖拽由操作系统管理，鼠标释放时自动结束
+    Ok(())
+}
+
+#[tauri::command]
+async fn exit_app(app: AppHandle) -> Result<(), String> {
+    app_info!("🚪 收到退出应用请求");
+    app.exit(0);
     Ok(())
 }
 
@@ -965,7 +1046,7 @@ async fn toggle_always_on_top(app: AppHandle) -> Result<bool, String> {
         window
             .set_always_on_top(!always_on_top)
             .map_err(|e| e.to_string())?;
-        println!("窗口置顶状态切换为: {}", !always_on_top);
+        app_info!("窗口置顶状态切换为: {}", !always_on_top);
         Ok(!always_on_top)
     } else {
         Err("窗口不存在".to_string())
@@ -977,9 +1058,66 @@ async fn reset_window_position(app: AppHandle) -> Result<(), String> {
     window_manager::position_live2d_window(app).await
 }
 
+/// 设置Live2D窗口为完全透明
+#[tauri::command]
+async fn set_window_transparent(app: AppHandle) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window("live2d") {
+        app_info!("🔍 设置Live2D窗口为完全透明...");
+
+        // 确保所有透明属性都正确设置
+        window.set_decorations(false).map_err(|e| e.to_string())?;
+
+        #[cfg(target_os = "macos")]
+        {
+            window.set_focusable(false).map_err(|e| e.to_string())?;
+            window.set_content_protected(false).map_err(|e| e.to_string())?;
+        }
+
+        app_info!("✅ Live2D窗口透明属性已设置完成");
+
+        // 发送透明化完成事件到前端
+        let payload = serde_json::json!({
+            "type": "window_transparent",
+            "timestamp": chrono::Utc::now().timestamp()
+        });
+
+        window.emit("window_transparent", &payload)
+            .map_err(|e| format!("发送透明化事件失败: {}", e))?;
+    }
+    Ok(())
+}
+
+/// 重新应用透明化设置（用于修复可能的覆盖）
+#[tauri::command]
+async fn reapply_transparency(app: AppHandle) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window("live2d") {
+        app_info!("🔄 重新应用透明化设置...");
+
+        // 重新设置所有透明属性
+        window.set_decorations(false).map_err(|e| e.to_string())?;
+
+        #[cfg(target_os = "macos")]
+        {
+            window.set_focusable(false).map_err(|e| e.to_string())?;
+            window.set_content_protected(false).map_err(|e| e.to_string())?;
+        }
+
+        // 强制窗口重绘（逻辑像素）
+        window.set_size(tauri::Size::Logical(tauri::LogicalSize {
+            width: 350.0,
+            height: 500.0,
+        })).map_err(|e| e.to_string())?;
+
+        std::thread::sleep(Duration::from_millis(100));
+
+        app_info!("✅ 透明化设置已重新应用");
+    }
+    Ok(())
+}
+
 #[tauri::command]
 async fn debug_right_click_menu(model_name: String) -> Result<(), String> {
-    println!("🖱️ 右键菜单被触发! 切换到模型: {}", model_name);
+    app_info!("🖱️ 右键菜单被触发! 切换到模型: {}", model_name);
     Ok(())
 }
 
@@ -991,7 +1129,6 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
             greet,
-            test_invoke,
             trigger_show_animation,
             switch_persona,
             show_live2d_window,
@@ -1006,10 +1143,15 @@ pub fn run() {
             set_window_position,
             start_mouse_tracking,
             start_manual_drag,
+            end_manual_drag,
+            exit_app,
             start_window_drag,
             toggle_always_on_top,
             reset_window_position,
             debug_right_click_menu,
+            // 透明度控制命令
+            set_window_transparent,
+            reapply_transparency,
             // 新增的屏幕边缘检测命令
             get_screen_bounds,
             get_window_bounds,
@@ -1017,19 +1159,56 @@ pub fn run() {
             constrain_window_position,
             predict_boundary_collision,
             set_constrained_window_position,
-            // 腾讯云语音服务命令
-            tencent_asr,
-            tencent_tts,
-            // Live2D语音交互命令
+              // Live2D语音交互命令
             trigger_live2d_expression,
             trigger_live2d_lip_sync,
             trigger_live2d_motion,
-            // 连接测试命令 (暂时注释)
-            // run_connection_test,
-            // run_system_diagnosis,
+            // 资源读取命令
+            read_resource_file,
+            read_binary_resource_file,
+            // 语音交互命令
+            tencent_asr,
+            tencent_tts,
+            recognize_audio_official,
+            synthesize_voice_official,
+            test_voice_recognition,
+            test_voice_synthesis,
         ])
         .setup(|app| {
-            println!("🚀 Tauri应用启动");
+            app_info!("🚀 Tauri应用启动");
+            app_debug!(
+                "日志系统状态: verbose={}",
+                crate::logger::is_verbose_logging()
+            );
+            app_trace!("日志系统已完成初始化");
+
+            app.listen("frontend_log", |event: tauri::Event| {
+                #[derive(Deserialize)]
+                struct FrontendLog {
+                    timestamp: String,
+                    level: String,
+                    scope: String,
+                    message: String,
+                    data: Option<serde_json::Value>,
+                }
+
+                let payload = event.payload();
+                if let Ok(log) = serde_json::from_str::<FrontendLog>(payload) {
+                    app_info!(
+                        "[frontend] [{}] [{}] [{}] {} {}",
+                        log.timestamp,
+                        log.level.to_uppercase(),
+                        log.scope,
+                        log.message,
+                        log.data
+                            .as_ref()
+                            .map(|value| value.to_string())
+                            .unwrap_or_default()
+                    );
+                } else {
+                    app_warn!("[frontend] failed to parse log payload: {}", payload);
+                }
+            });
 
     
             // 创建应用状态
@@ -1042,7 +1221,7 @@ pub fn run() {
 
             // 初始化窗口
             if let Err(e) = initialize_windows(&app.handle(), &menu_state) {
-                eprintln!("❌ 窗口初始化失败: {}", e);
+                app_error!("❌ 窗口初始化失败: {}", e);
             }
 
             // 设置托盘并保存到状态中
@@ -1050,11 +1229,11 @@ pub fn run() {
                 Ok(tray) => {
                     if let Ok(mut tray_state) = app_state.tray_icon.lock() {
                         *tray_state = Some(tray);
-                        println!("✅ 托盘图标已保存到应用状态");
+                        app_info!("✅ 托盘图标已保存到应用状态");
                     }
                 }
                 Err(e) => {
-                    eprintln!("❌ 托盘设置失败: {}", e);
+                    app_error!("❌ 托盘设置失败: {}", e);
                 }
             }
 
@@ -1072,7 +1251,7 @@ fn initialize_windows(
     app: &AppHandle,
     _menu_state: &Arc<Mutex<window_state::WindowState>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    println!("🏠 初始化窗口...");
+    app_info!("🏠 初始化窗口...");
 
     // 延迟显示和定位窗口
     let app_clone = app.clone();
@@ -1082,7 +1261,7 @@ fn initialize_windows(
         if let Err(e) = tauri::async_runtime::block_on(async {
             window_manager::position_live2d_window(app_clone.clone()).await
         }) {
-            eprintln!("窗口定位失败: {}", e);
+            app_error!("窗口定位失败: {}", e);
         }
     });
 
@@ -1094,7 +1273,7 @@ fn setup_tray(
     app: &AppHandle,
     menu_state: Arc<Mutex<window_state::WindowState>>,
 ) -> Result<TrayIcon, Box<dyn std::error::Error>> {
-    println!("🎯 设置系统托盘...");
+    app_info!("🎯 设置系统托盘...");
 
     // 创建菜单
     let menu = tray_manager::create_tray_menu(app, menu_state.clone())?;
@@ -1111,22 +1290,22 @@ fn setup_tray(
         .show_menu_on_left_click(true)
         .tooltip("Live2D Assistant")
         .on_menu_event(move |app, event| {
-            println!("🎯 托盘菜单事件: {:?}", event.id);
+            app_info!("🎯 托盘菜单事件: {:?}", event.id);
             match event.id.as_ref() {
                 "show_pet" => {
-                    println!("📺 显示宠物请求");
+                    app_info!("📺 显示宠物请求");
                     if let Err(e) = tauri::async_runtime::block_on(async {
                         window_manager::show_live2d_window(app.clone()).await
                     }) {
-                        eprintln!("❌ 显示宠物失败: {}", e);
+                        app_error!("❌ 显示宠物失败: {}", e);
                     }
                 }
                 "hide_pet" => {
-                    println!("📺 隐藏宠物请求");
+                    app_info!("📺 隐藏宠物请求");
                     if let Err(e) = tauri::async_runtime::block_on(async {
                         window_manager::hide_live2d_window(app.clone()).await
                     }) {
-                        eprintln!("❌ 隐藏宠物失败: {}", e);
+                        app_error!("❌ 隐藏宠物失败: {}", e);
                     }
                 }
                 _ => {
@@ -1134,20 +1313,20 @@ fn setup_tray(
                     if let Err(e) =
                         tray_manager::handle_tray_event(app, &event.id, tray_menu_state.clone())
                     {
-                        eprintln!("托盘事件处理失败: {}", e);
+                        app_error!("托盘事件处理失败: {}", e);
                     }
                 }
             }
         })
         .build(app)?;
 
-    println!("✅ 系统托盘设置完成");
+    app_info!("✅ 系统托盘设置完成");
     Ok(tray)
 }
 
 /// 创建托盘图标数据
 fn create_tray_icon_data() -> Result<Image<'static>, Box<dyn std::error::Error>> {
-    println!("🔍 开始加载托盘图标...");
+    app_info!("🔍 开始加载托盘图标...");
 
     // 1. 首先尝试从文件系统加载（开发环境）
     let possible_paths = vec![
@@ -1158,11 +1337,11 @@ fn create_tray_icon_data() -> Result<Image<'static>, Box<dyn std::error::Error>>
     ];
 
     for icon_path in possible_paths {
-        println!("🔍 尝试加载托盘图标: {}", icon_path);
+        app_info!("🔍 尝试加载托盘图标: {}", icon_path);
 
         match fs::read(&icon_path) {
             Ok(icon_data) => {
-                println!("✅ 成功读取文件: {}, 大小: {} bytes", icon_path, icon_data.len());
+                app_info!("✅ 成功读取文件: {}, 大小: {} bytes", icon_path, icon_data.len());
 
                 // 尝试解码图片
                 match image::load_from_memory(&icon_data) {
@@ -1172,31 +1351,31 @@ fn create_tray_icon_data() -> Result<Image<'static>, Box<dyn std::error::Error>>
                         let (width, height) = rgba_img.dimensions();
                         let rgba = rgba_img.into_raw();
 
-                        println!("✅ 成功加载托盘图标: {}x{} 像素 (路径: {})", width, height, icon_path);
+                        app_info!("✅ 成功加载托盘图标: {}x{} 像素 (路径: {})", width, height, icon_path);
                         return Ok(Image::new_owned(rgba, width, height));
                     }
                     Err(e) => {
-                        eprintln!("❌ 图片解码失败: {} (路径: {}), 尝试下一个路径", e, icon_path);
+                        app_error!("❌ 图片解码失败: {} (路径: {}), 尝试下一个路径", e, icon_path);
                         continue;
                     }
                 }
             }
             Err(e) => {
-                eprintln!("❌ 无法读取托盘图标文件: {} (路径: {}), 尝试下一个路径", e, icon_path);
+                app_error!("❌ 无法读取托盘图标文件: {} (路径: {}), 尝试下一个路径", e, icon_path);
                 continue;
             }
         }
     }
 
     // 3. 如果文件系统加载失败，尝试使用嵌入的图标
-    println!("⚠️ 文件系统加载失败，尝试使用嵌入的图标");
+    app_info!("⚠️ 文件系统加载失败，尝试使用嵌入的图标");
     if let Ok(icon_data) = get_embedded_icon() {
-        println!("✅ 使用嵌入的托盘图标");
+        app_info!("✅ 使用嵌入的托盘图标");
         return Ok(icon_data);
     }
 
     // 4. 如果所有方法都失败，使用内置的备用图标
-    eprintln!("❌ 所有托盘图标路径都失败，使用内置备用图标");
+    app_error!("❌ 所有托盘图标路径都失败，使用内置备用图标");
     create_fallback_tray_icon()
 }
 
@@ -1212,7 +1391,7 @@ fn get_embedded_icon() -> Result<Image<'static>, Box<dyn std::error::Error>> {
 
     for (path, data) in icon_paths.iter() {
         if data.len() > 0 {
-            println!("✅ 使用嵌入的托盘图标: {}", path);
+            app_info!("✅ 使用嵌入的托盘图标: {}", path);
 
             // 尝试解码图片
             match image::load_from_memory(data) {
@@ -1223,7 +1402,7 @@ fn get_embedded_icon() -> Result<Image<'static>, Box<dyn std::error::Error>> {
                     return Ok(Image::new_owned(rgba, width, height));
                 }
                 Err(e) => {
-                    eprintln!("❌ 嵌入图标解码失败: {} (路径: {}), 尝试下一个", e, path);
+                    app_error!("❌ 嵌入图标解码失败: {} (路径: {}), 尝试下一个", e, path);
                     continue;
                 }
             }
@@ -1231,39 +1410,8 @@ fn get_embedded_icon() -> Result<Image<'static>, Box<dyn std::error::Error>> {
     }
 
     // 如果所有嵌入图标都失败，使用代码生成的备用图标
-    println!("⚠️ 所有嵌入图标都失败，使用代码生成的备用图标");
+    app_info!("⚠️ 所有嵌入图标都失败，使用代码生成的备用图标");
     Err(From::from("无法加载嵌入图标"))
-}
-
-/// 创建托盘图标像素数据
-fn create_tray_icon_pixels() -> Vec<u8> {
-    let mut rgba = Vec::with_capacity(32 * 32 * 4);
-
-    for y in 0..32 {
-        for x in 0..32 {
-            let center_x = 16.0;
-            let center_y = 16.0;
-            let dx = x as f32 - center_x;
-            let dy = y as f32 - center_y;
-            let distance = (dx * dx + dy * dy).sqrt();
-
-            if distance < 14.0 {
-                // 主要圆形 - 明亮的白色
-                rgba.push(255); // R
-                rgba.push(255); // G
-                rgba.push(255); // B
-                rgba.push(255); // A
-            } else {
-                // 完全透明的背景
-                rgba.push(0);   // R
-                rgba.push(0);   // G
-                rgba.push(0);   // B
-                rgba.push(0);   // A
-            }
-        }
-    }
-
-    rgba
 }
 
 /// 创建备用托盘图标（简单的白色圆形）
@@ -1285,7 +1433,7 @@ fn create_fallback_tray_icon() -> Result<Image<'static>, Box<dyn std::error::Err
         0, 0, 180, 0, 0, 0, 180, 0, 0, 0, 180, 0, 0, 0, 180,
     ];
 
-    println!("✅ 使用备用托盘图标");
+    app_info!("✅ 使用备用托盘图标");
     Ok(Image::new_owned(rgba, 16, 16))
 }
 
@@ -1293,7 +1441,7 @@ fn create_fallback_tray_icon() -> Result<Image<'static>, Box<dyn std::error::Err
 
 #[tauri::command]
 async fn trigger_live2d_expression(app: AppHandle, expression: String) -> Result<(), String> {
-    println!("🎭 触发Live2D表情: {}", expression);
+    app_info!("🎭 触发Live2D表情: {}", expression);
 
     // 发送表情事件到Live2D窗口
     if let Some(window) = app.get_webview_window("live2d") {
@@ -1312,7 +1460,7 @@ async fn trigger_live2d_expression(app: AppHandle, expression: String) -> Result
 
 #[tauri::command]
 async fn trigger_live2d_lip_sync(app: AppHandle, text: String, lip_sync_data: serde_json::Value) -> Result<(), String> {
-    println!("🗣️ 触发Live2D口型同步: {}", text);
+    app_info!("🗣️ 触发Live2D口型同步: {}", text);
 
     // 发送口型同步数据到Live2D窗口
     if let Some(window) = app.get_webview_window("live2d") {
@@ -1332,7 +1480,7 @@ async fn trigger_live2d_lip_sync(app: AppHandle, text: String, lip_sync_data: se
 
 #[tauri::command]
 async fn trigger_live2d_motion(app: AppHandle, motion: String) -> Result<(), String> {
-    println!("🎬 触发Live2D动作: {}", motion);
+    app_info!("🎬 触发Live2D动作: {}", motion);
 
     // 发送动作事件到Live2D窗口
     if let Some(window) = app.get_webview_window("live2d") {
@@ -1349,7 +1497,121 @@ async fn trigger_live2d_motion(app: AppHandle, motion: String) -> Result<(), Str
     Ok(())
 }
 
-// 添加chrono依赖到Cargo.toml
+/// 读取文本资源文件
+#[tauri::command]
+async fn read_resource_file(path: String) -> Result<String, String> {
+    app_info!("📁 读取资源文件: {}", path);
+
+    // 构建实际的文件路径
+    let resource_path = if cfg!(debug_assertions) {
+        // 开发环境
+        format!("../dist/{}", path)
+    } else {
+        // 生产环境：尝试不同的路径
+        let possible_paths = vec![
+            format!("_up_/dist/{}", path),
+            format!("Resources/_up_/dist/{}", path),
+            format!("dist/{}", path),
+        ];
+
+        for p in &possible_paths {
+            if std::path::Path::new(&p).exists() {
+                app_info!("✅ 找到资源文件: {}", p);
+                return Ok(std::fs::read_to_string(&p)
+                    .map_err(|e| format!("读取文件失败: {}", e))?);
+            }
+        }
+
+        return Err(format!("找不到资源文件: {} (尝试的路径: {:?})", path, possible_paths));
+    };
+
+    std::fs::read_to_string(&resource_path)
+        .map_err(|e| format!("读取文件失败: {}", e))
+}
+
+/// 读取二进制资源文件
+#[tauri::command]
+async fn read_binary_resource_file(path: String) -> Result<Vec<u8>, String> {
+    app_info!("📁 读取二进制资源文件: {}", path);
+
+    // 构建实际的文件路径
+    let resource_path = if cfg!(debug_assertions) {
+        // 开发环境
+        format!("../dist/{}", path)
+    } else {
+        // 生产环境：尝试不同的路径
+        let possible_paths = vec![
+            format!("_up_/dist/{}", path),
+            format!("Resources/_up_/dist/{}", path),
+            format!("dist/{}", path),
+        ];
+
+        for p in &possible_paths {
+            if std::path::Path::new(&p).exists() {
+                app_info!("✅ 找到二进制资源文件: {}", p);
+                return Ok(std::fs::read(&p)
+                    .map_err(|e| format!("读取二进制文件失败: {}", e))?);
+            }
+        }
+
+        return Err(format!("找不到二进制资源文件: {} (尝试的路径: {:?})", path, possible_paths));
+    };
+
+    std::fs::read(&resource_path)
+        .map_err(|e| format!("读取二进制文件失败: {}", e))
+}
+
+// ========== 语音交互命令 ==========
+
+/// 腾讯云语音识别命令
+#[tauri::command]
+async fn tencent_asr(config: voice_service::TencentASRConfig, audio_data: Vec<u8>) -> Result<voice_service::ASRResult, String> {
+    voice_service::tencent_asr(config, audio_data).await
+}
+
+/// 腾讯云语音合成命令
+#[tauri::command]
+async fn tencent_tts(config: voice_service::TencentTTSConfig, text: String) -> Result<voice_service::TTSResult, String> {
+    voice_service::tencent_tts(config, text).await
+}
+
+/// 通用音频识别命令
+#[tauri::command]
+async fn recognize_audio_official(
+    config: voice_service::TencentASRConfig,
+    audio_data: Vec<u8>
+) -> Result<voice_service::ASRResult, String> {
+    app_info!("🔍 通用音频识别 - 使用腾讯云ASR");
+    voice_service::tencent_asr(config, audio_data).await
+}
+
+/// 通用语音合成命令
+#[tauri::command]
+async fn synthesize_voice_official(
+    config: voice_service::TencentTTSConfig,
+    text: String
+) -> Result<voice_service::TTSResult, String> {
+    app_info!("🔊 通用语音合成 - 使用腾讯云TTS");
+    voice_service::tencent_tts(config, text).await
+}
+
+/// 测试语音识别命令
+#[tauri::command]
+async fn test_voice_recognition() -> Result<String, String> {
+    app_info!("🧪 测试语音识别功能");
+
+    // 这里可以添加简单的测试逻辑
+    Ok("语音识别测试完成".to_string())
+}
+
+/// 测试语音合成命令
+#[tauri::command]
+async fn test_voice_synthesis(text: String) -> Result<String, String> {
+    app_info!("🧪 测试语音合成功能: {}", text);
+
+    // 这里可以添加简单的测试逻辑
+    Ok(format!("语音合成测试完成: {}", text))
+}
 #[cfg(test)]
 mod tests {
     #[test]

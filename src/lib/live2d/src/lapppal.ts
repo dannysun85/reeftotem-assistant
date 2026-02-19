@@ -58,7 +58,6 @@ export class LAppPal {
    * @param callback 読み込み完了時のコールバック関数
    */
   public static moveFileData(filePath: string, callback: (arrayBuffer: ArrayBuffer) => void): void {
-    console.log(`LAppPal.moveFileData: 加载文件 ${filePath}`);
     fetch(filePath)
       .then(response => {
         if (!response.ok) {
@@ -67,7 +66,6 @@ export class LAppPal {
         return response.arrayBuffer();
       })
       .then(arrayBuffer => {
-        console.log(`LAppPal.moveFileData: 成功加载文件，大小: ${arrayBuffer.byteLength} bytes`);
         callback(arrayBuffer);
       })
       .catch(error => {
@@ -96,17 +94,12 @@ export class LAppPal {
    * @return Promise<ArrayBuffer>
    */
   public static createFileArrayBuffer(filePath: string): Promise<ArrayBuffer> {
-    console.log(`LAppPal.createFileArrayBuffer: 加载文件 ${filePath}`);
     return fetch(filePath)
       .then(response => {
         if (!response.ok) {
           throw new Error(`HTTP ${response.status}: ${response.statusText}`);
         }
         return response.arrayBuffer();
-      })
-      .then(arrayBuffer => {
-        console.log(`LAppPal.createFileArrayBuffer: 成功加载文件，大小: ${arrayBuffer.byteLength} bytes`);
-        return arrayBuffer;
       })
       .catch(error => {
         console.error(`LAppPal.createFileArrayBuffer: 加载文件失败 ${filePath}`, error);
@@ -126,13 +119,11 @@ export class LAppPal {
    * @return Canvas元素
    */
   public static getCanvasElement(canvasId: string): HTMLCanvasElement | null {
-    console.log(`LAppPal.getCanvasElement: 查找Canvas元素，ID: ${canvasId}`);
     const element = document.getElementById(canvasId) as HTMLCanvasElement;
     if (!element) {
       console.error(`LAppPal.getCanvasElement: Canvas元素未找到: ${canvasId}`);
       return null;
     }
-    console.log(`LAppPal.getCanvasElement: Canvas元素找到:`, element);
     return element;
   }
 
@@ -142,7 +133,6 @@ export class LAppPal {
    * @return 是否成功（总是返回true，因为浏览器不需要创建目录）
    */
   public static createDirectory(path: string): boolean {
-    console.log(`LAppPal.createDirectory: 创建目录 ${path} (浏览器环境，无需操作)`);
     return true;
   }
 

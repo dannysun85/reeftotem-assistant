@@ -39,7 +39,7 @@ export const getDebugInfo = async (): Promise<DebugInfo> => {
   const timestamp = new Date().toISOString();
   const userAgent = navigator.userAgent;
   const platform = navigator.platform;
-  const languages = navigator.languages;
+  const languages = [...navigator.languages];
 
   // 检查网络状态
   const online = navigator.onLine;

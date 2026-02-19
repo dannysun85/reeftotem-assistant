@@ -692,7 +692,7 @@ const ChatInterface: React.FC = () => {
                       <CardContent className="space-y-2">
                         <div className="flex justify-between text-sm">
                           <span>版本</span>
-                          <Badge variant="secondary">0.2.0-alpha</Badge>
+                          <Badge variant="secondary">0.2.0</Badge>
                         </div>
                         <div className="flex justify-between text-sm">
                           <span>构建</span>

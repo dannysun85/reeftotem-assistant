@@ -63,7 +63,6 @@ export const useLive2DLipSync = (): LipSyncReturn => {
       }
 
       const lipSyncCount = lipSyncIds.getSize();
-      console.log(`发现 ${lipSyncCount} 个唇形同步参数`);
 
       // 转换为JavaScript数组，并提取字符串ID
       const lipSyncArray = [];
@@ -98,7 +97,6 @@ export const useLive2DLipSync = (): LipSyncReturn => {
     }
 
     lipSyncConfigRef.current.enabled = true;
-    console.log('✅ Live2D唇形同步系统已激活');
     return true;
   }, [getLipSyncIds]);
 
@@ -135,7 +133,6 @@ export const useLive2DLipSync = (): LipSyncReturn => {
       console.error('重置唇形参数失败:', error);
     }
 
-    console.log('Live2D唇形同步系统已禁用');
   }, []);
 
   /**
@@ -245,7 +242,6 @@ export const useLive2DLipSync = (): LipSyncReturn => {
     config.sensitivity = Math.max(0.1, Math.min(2.0, sensitivity));
     config.smoothingFactor = Math.max(0.1, Math.min(0.9, smoothingFactor));
 
-    console.log(`唇形同步配置: 灵敏度=${config.sensitivity}, 平滑因子=${config.smoothingFactor}`);
   }, []);
 
   /**
@@ -256,8 +252,6 @@ export const useLive2DLipSync = (): LipSyncReturn => {
       const activated = activateLipSync();
       if (!activated) return false;
     }
-
-    console.log('开始唇形同步测试...');
 
     // 模拟语音波形：渐强 -> 渐弱 -> 静音
     const testSequence = [
@@ -274,7 +268,6 @@ export const useLive2DLipSync = (): LipSyncReturn => {
     testSequence.forEach(({ level, duration }) => {
       setTimeout(() => {
         setLipSyncValue(level);
-        console.log(`测试音量级别: ${level.toFixed(2)}`);
       }, totalDelay);
       totalDelay += duration;
     });
@@ -282,7 +275,6 @@ export const useLive2DLipSync = (): LipSyncReturn => {
     // 测试完成后重置
     setTimeout(() => {
       setLipSyncValue(0.0);
-      console.log('✅ 唇形同步测试完成');
     }, totalDelay);
 
     return true;

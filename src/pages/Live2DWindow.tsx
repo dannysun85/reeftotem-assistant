@@ -2,36 +2,43 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Live2DCanvas, live2DResourceManager, useLive2D } from '../live2d';
 import { isTauriEnvironment } from '../tauri-shim';
-import ContextMenu from '../components/Live2D/ContextMenu';
+import Live2DActionPanel from '../components/Live2D/Live2DActionPanel';
 import { createLogger } from '../utils/Logger';
 import { useLive2DExpressions } from '../hooks/useLive2DExpressions';
+import { useModelInteraction } from '../hooks/useModelInteraction';
+import { getModelInteractionConfig } from '../data/model-interactions';
 
 const logger = createLogger('Live2DWindow');
 
+const DEFAULT_PERSONA = 'HaruGreeter';
+
 const getInitialPersona = () => {
   if (typeof window === 'undefined') {
-    return 'HaruGreeter';
+    return DEFAULT_PERSONA;
   }
   const stored = localStorage.getItem('currentPersona');
-  if (!stored) {
-    return 'HaruGreeter';
+  if (!stored || !stored.trim()) {
+    return DEFAULT_PERSONA;
   }
-  const normalized = stored.trim();
-  return normalized.length > 0 ? normalized : 'HaruGreeter';
+  // Validate against available Live2D models
+  const available = live2DResourceManager.getAvailableModels();
+  const match = available.find(m => m.name === stored.trim());
+  if (!match) {
+    // Invalid model name stored (e.g. agent name) — reset to default
+    localStorage.setItem('currentPersona', DEFAULT_PERSONA);
+    return DEFAULT_PERSONA;
+  }
+  return stored.trim();
 };
 
 export const Live2DWindow: React.FC = () => {
   const containerRef = useRef<HTMLDivElement>(null);
-  const [contextMenu, setContextMenu] = useState({
-    visible: false,
-    x: 0,
-    y: 0
-  });
+  const [panelVisible, setPanelVisible] = useState(false);
   const [eyeTrackingEnabled, setEyeTrackingEnabled] = useState(true);
   const [isDragging, setIsDragging] = useState(false);
   const [currentPersona, setCurrentPersona] = useState<string>(getInitialPersona());
-  const [canvasSize, setCanvasSize] = useState({ width: 350, height: 500 });
-  const [canvasOpacity, setCanvasOpacity] = useState(0); // 初始为0，首次加载也带淡入
+  const [canvasSize, setCanvasSize] = useState({ width: 250, height: 350 });
+  const [canvasOpacity, setCanvasOpacity] = useState(0);
 
   const currentPersonaRef = useRef(currentPersona);
   const isInitializedRef = useRef(false);
@@ -40,16 +47,21 @@ export const Live2DWindow: React.FC = () => {
   const transitioningRef = useRef(false);
 
   const { state: live2dState, actions, canvasRef: live2dCanvasRef } = useLive2D({
-    width: 350,
-    height: 500,
+    width: 250,
+    height: 350,
     transparentBackground: true,
     enablePhysics: true,
     enableExpressions: true,
     maxFPS: 60
   });
 
-  const { switchModel, triggerExpression, triggerMotion, setEyeTracking } = actions;
+  const { switchModel, triggerExpression, triggerMotion, setEyeTracking, setLipSync } = actions;
   const { triggerRandomExpression } = useLive2DExpressions();
+  const { executeInteraction, handleModelClick } = useModelInteraction({
+    triggerMotion,
+    triggerExpression,
+    triggerRandomExpression,
+  });
 
   useEffect(() => {
     currentPersonaRef.current = currentPersona;
@@ -87,7 +99,6 @@ export const Live2DWindow: React.FC = () => {
       localStorage.setItem('currentPersona', modelName);
     }
     hasInitialSwitchRef.current = true;
-    // 确保模型加载后显示（首次加载或事件驱动的切换）
     if (!transitioningRef.current) {
       setCanvasOpacity(1);
     }
@@ -97,21 +108,25 @@ export const Live2DWindow: React.FC = () => {
     if (!modelName) {
       return;
     }
+    // Validate model name against available models
+    const models = live2DResourceManager.getAvailableModels();
+    if (!models.find(m => m.name === modelName)) {
+      logger.warn('无效的模型名称，忽略切换', { modelName });
+      return;
+    }
     if (modelName === currentPersonaRef.current && live2dState.currentModel === modelName) {
       return;
     }
     if (transitioningRef.current) {
-      return; // 正在切换中，忽略重复请求
+      return;
     }
 
     logger.info('切换模型请求', { modelName });
     transitioningRef.current = true;
 
-    // 1. 淡出 (200ms)
     setCanvasOpacity(0);
     await new Promise(r => setTimeout(r, 250));
 
-    // 2. 切换模型（异步加载）
     const success = await switchModel(modelName);
     if (!success) {
       logger.warn('模型切换失败', { modelName });
@@ -120,10 +135,8 @@ export const Live2DWindow: React.FC = () => {
       return;
     }
 
-    // 3. 等待模型加载和首帧渲染
     await new Promise(r => setTimeout(r, 600));
 
-    // 4. 淡入 (200ms)
     setCanvasOpacity(1);
     transitioningRef.current = false;
   }, [switchModel, live2dState.currentModel]);
@@ -183,12 +196,42 @@ export const Live2DWindow: React.FC = () => {
           void switchToModel(modelName);
         });
 
+        const exprListener = await listen<{ expression: string }>('live2d_expression', (event) => {
+          const { expression } = event.payload;
+          logger.info('收到表情事件', { expression });
+          triggerExpression(expression);
+        });
+
+        const motionListener = await listen<{ motion: string }>('live2d_motion', (event) => {
+          const { motion } = event.payload;
+          logger.info('收到动作事件', { motion });
+          triggerMotion(motion);
+        });
+
+        const lipSyncListener = await listen<{ text: string; data: any[] }>('live2d_lip_sync', () => {
+          // Legacy event - now using live2d_lip_sync_level instead
+        });
+
+        const lipSyncLevelListener = await listen<number>('live2d_lip_sync_level', (event) => {
+          setLipSync(event.payload);
+        });
+
         if (disposed) {
           listener();
+          exprListener();
+          motionListener();
+          lipSyncListener();
+          lipSyncLevelListener();
           return;
         }
 
-        unlisten = listener;
+        unlisten = () => {
+          listener();
+          exprListener();
+          motionListener();
+          lipSyncListener();
+          lipSyncLevelListener();
+        };
         logger.info('事件监听器设置成功');
       } catch (error) {
         logger.error('设置事件监听器失败', error);
@@ -202,7 +245,7 @@ export const Live2DWindow: React.FC = () => {
         unlisten();
       }
     };
-  }, [switchToModel]);
+  }, [switchToModel, triggerExpression, triggerMotion, setLipSync]);
 
   const availableModels = useMemo(() => {
     if (live2dState.availableModels.length > 0) {
@@ -211,100 +254,73 @@ export const Live2DWindow: React.FC = () => {
     return live2DResourceManager.getAvailableModels();
   }, [live2dState.availableModels]);
 
-  const menuItems = useMemo(() => {
-    const modelItems = availableModels.map((model) => ({
-      id: model.name,
-      label: currentPersona === model.name ? `✅ ${model.displayName}` : model.displayName,
-      action: () => {
-        void switchToModel(model.name);
-      }
-    }));
+  // Current model display name
+  const currentDisplayName = useMemo(() => {
+    const model = availableModels.find(m => m.name === currentPersona);
+    return model?.displayName || currentPersona;
+  }, [availableModels, currentPersona]);
 
-    return [
-      {
-        id: 'models',
-        label: '👥 切换模型',
-        children: modelItems
-      },
-      {
-        type: 'separator' as const
-      },
-      {
-        id: 'expressions',
-        label: '😊 表情测试',
-        children: [
-          {
-            id: 'random',
-            label: '🎲 随机表情',
-            action: () => triggerRandomExpression()
-          },
-          {
-            id: 'happy',
-            label: '😄 开心',
-            action: () => triggerExpression('happy')
-          },
-          {
-            id: 'surprised',
-            label: '😲 惊讶',
-            action: () => triggerExpression('surprised')
-          },
-          {
-            id: 'sad',
-            label: '😢 悲伤',
-            action: () => triggerExpression('sad')
-          }
-        ]
-      },
-      {
-        type: 'separator' as const
-      },
-      {
-        id: 'eyeTracking',
-        label: eyeTrackingEnabled ? '👁️ 关闭眼神跟随' : '👁️ 开启眼神跟随',
-        action: () => {
-          const next = !eyeTrackingEnabled;
-          setEyeTrackingEnabled(next);
-          if (!next) {
-            setEyeTracking(0.5, 0.5);
-          }
-        }
-      },
-      {
-        id: 'motion',
-        label: '🎬 触发动作',
-        action: () => triggerMotion('tap')
-      },
-      {
-        type: 'separator' as const
-      },
-      {
-        id: 'exit',
-        label: '退出',
-        action: async () => {
-          try {
-            if (isTauriEnvironment()) {
-              const { invoke } = await import('@tauri-apps/api/core');
-              await invoke('exit_app');
-            }
-          } catch (err) {
-            logger.error('退出应用失败', err);
-          }
-        }
+  // Current model interactions
+  const currentInteractions = useMemo(() => {
+    return getModelInteractionConfig(currentPersona)?.menuInteractions ?? [];
+  }, [currentPersona]);
+
+  // Model prev/next switching
+  const handleSwitchPrev = useCallback(() => {
+    if (availableModels.length <= 1) return;
+    const idx = availableModels.findIndex(m => m.name === currentPersona);
+    const prevIdx = (idx - 1 + availableModels.length) % availableModels.length;
+    setPanelVisible(false);
+    void switchToModel(availableModels[prevIdx].name);
+  }, [availableModels, currentPersona, switchToModel]);
+
+  const handleSwitchNext = useCallback(() => {
+    if (availableModels.length <= 1) return;
+    const idx = availableModels.findIndex(m => m.name === currentPersona);
+    const nextIdx = (idx + 1) % availableModels.length;
+    setPanelVisible(false);
+    void switchToModel(availableModels[nextIdx].name);
+  }, [availableModels, currentPersona, switchToModel]);
+
+  const handleToggleEyeTracking = useCallback(() => {
+    const next = !eyeTrackingEnabled;
+    setEyeTrackingEnabled(next);
+    if (!next) {
+      setEyeTracking(0.5, 0.5);
+    }
+  }, [eyeTrackingEnabled, setEyeTracking]);
+
+  const handleHideModel = useCallback(async () => {
+    setPanelVisible(false);
+    try {
+      if (isTauriEnvironment()) {
+        const { invoke } = await import('@tauri-apps/api/core');
+        await invoke('hide_live2d_window');
       }
-    ];
-  }, [availableModels, currentPersona, eyeTrackingEnabled, switchToModel, triggerExpression, triggerMotion, triggerRandomExpression, setEyeTracking]);
+    } catch (err) {
+      logger.error('隐藏模型失败', err);
+    }
+  }, []);
+
+  const handleExit = useCallback(async () => {
+    setPanelVisible(false);
+    try {
+      if (isTauriEnvironment()) {
+        const { invoke } = await import('@tauri-apps/api/core');
+        await invoke('exit_app');
+      }
+    } catch (err) {
+      logger.error('退出应用失败', err);
+    }
+  }, []);
 
   const handleContextMenu = useCallback((event: React.MouseEvent) => {
     event.preventDefault();
-    setContextMenu({
-      visible: true,
-      x: event.clientX,
-      y: event.clientY
-    });
+    setPanelVisible(true);
   }, []);
 
-  const closeContextMenu = useCallback(() => {
-    setContextMenu(prev => ({ ...prev, visible: false }));
+  const closePanel = useCallback(() => {
+    setPanelVisible(false);
   }, []);
 
   const handleMouseDown = useCallback(async (event: React.MouseEvent) => {
@@ -351,8 +367,8 @@ export const Live2DWindow: React.FC = () => {
       return;
     }
 
-    triggerRandomExpression();
-  }, [isDragging, triggerRandomExpression]);
+    handleModelClick(currentPersona);
+  }, [isDragging, handleModelClick, currentPersona]);
 
   return (
     <div
@@ -416,12 +432,19 @@ export const Live2DWindow: React.FC = () => {
         />
       </div>
 
-      <ContextMenu
-        visible={contextMenu.visible}
-        x={contextMenu.x}
-        y={contextMenu.y}
-        onClose={closeContextMenu}
-        menuItems={menuItems}
+      <Live2DActionPanel
+        visible={panelVisible}
+        onClose={closePanel}
+        currentModel={currentPersona}
+        currentModelDisplayName={currentDisplayName}
+        onSwitchPrev={handleSwitchPrev}
+        onSwitchNext={handleSwitchNext}
+        interactions={currentInteractions}
+        onExecuteInteraction={(item) => { executeInteraction(item); closePanel(); }}
+        eyeTrackingEnabled={eyeTrackingEnabled}
+        onToggleEyeTracking={handleToggleEyeTracking}
+        onHideModel={handleHideModel}
+        onExit={handleExit}
       />
     </div>
   );

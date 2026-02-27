@@ -1,6 +1,8 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
+import '@/i18n';
 import App from "./App";
+import { Toaster } from "sonner";
 import "./index.css";
 import { createLogger, initializeLogger } from "./utils/Logger";
 
@@ -17,7 +19,12 @@ if (root) {
   logger.info("creating React root");
   const reactRoot = ReactDOM.createRoot(root);
   logger.info("rendering App");
-  reactRoot.render(<App />);
+  reactRoot.render(
+    <>
+      <App />
+      <Toaster />
+    </>
+  );
   logger.info("App rendered");
 } else {
   logger.error("Root element not found");

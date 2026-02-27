@@ -1,0 +1,44 @@
+{
+    "offlineNotice": "OpenClaw 离线",
+    "offlineDesc": "OpenClaw 将自动启动。本地模式下仍可使用聊天。",
+    "welcome": {
+        "title": "ClawX 聊天",
+        "subtitle": "您的 AI 助手已就绪。在下方开始对话。",
+        "askQuestions": "提问",
+        "askQuestionsDesc": "获取任何话题的答案",
+        "creativeTasks": "创意任务",
+        "creativeTasksDesc": "写作、头脑风暴、创意"
+    },
+    "noLogs": "（暂无日志）",
+    "toolbar": {
+        "newSession": "新会话",
+        "refresh": "刷新聊天",
+        "showThinking": "显示思考过程",
+        "hideThinking": "隐藏思考过程",
+        "showAllSessions": "显示所有会话",
+        "filterByAgent": "按智能体过滤会话",
+        "noAgent": "未配置智能体",
+        "selectAgent": "选择智能体"
+    },
+    "sessions": {
+        "title": "对话",
+        "search": "搜索..."
+    },
+    "empty": "发送消息开始对话",
+    "input": {
+        "placeholder": "输入消息..."
+    },
+    "streaming": {
+        "thinking": "AI 正在思考...",
+        "abort": "停止生成"
+    },
+    "mic": {
+        "recording": "录音中...",
+        "processing": "识别中..."
+    },
+    "tts": {
+        "speak": "朗读",
+        "autoOn": "关闭自动朗读",
+        "autoOff": "开启自动朗读"
+    }
+}

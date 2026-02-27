@@ -83,7 +83,7 @@ export class AIService {
 
     // 调试日志
     if (import.meta.env.VITE_DEBUG_AI === 'true') {
-      console.log('🔧 AI服务初始化配置:', config);
+      console.log('AI服务初始化: provider=%s, model=%s', config.provider, config.model);
     }
   }
 
@@ -102,7 +102,6 @@ export class AIService {
    */
   configure(config: Partial<AIModelConfig>): void {
     this.config = { ...this.config, ...config };
-    console.log('AI服务配置已更新:', this.config);
   }
 
   /**
@@ -117,7 +116,6 @@ export class AIService {
    */
   clearHistory(): void {
     this.conversationHistory = [];
-    console.log('AI对话历史已清空');
   }
 
   /**
@@ -137,9 +135,7 @@ export class AIService {
       const isDebug = import.meta.env.VITE_DEBUG_AI === 'true';
 
       if (isDebug) {
-        console.log('🤖 开始生成AI回复...');
-        console.log('📝 用户输入:', userMessage);
-        console.log('🔧 当前AI配置:', this.config);
+        console.log('AI: generating response for input length=%d, provider=%s', userMessage.length, this.config.provider);
       }
 
       // 添加用户消息到历史
@@ -181,14 +177,10 @@ export class AIService {
         this.conversationHistory = this.conversationHistory.slice(-20);
       }
 
-      console.log('✅ AI回复生成完成:', response.text);
       return response;
 
     } catch (error: any) {
-      console.error('❌ AI回复生成失败:', error);
-
-      // 降级到本地回复
-      console.log('🔄 降级到本地回复生成...');
+      console.error('AI回复生成失败:', error);
       return this.generateLocalResponse(userMessage);
     }
   }

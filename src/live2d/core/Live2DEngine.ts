@@ -337,10 +337,10 @@ export class Live2DEngine {
   /**
    * 触发动作
    */
-  public triggerMotion(motionName: string): void {
+  public triggerMotion(motionName: string, motionIndex?: number): void {
     if (this.lAppDelegate && this.lAppDelegate.startMotion) {
-      this.lAppDelegate.startMotion(motionName);
-      this.emitEvent('motionTriggered', { motion: motionName });
+      this.lAppDelegate.startMotion(motionName, motionIndex);
+      this.emitEvent('motionTriggered', { motion: motionName, motionIndex });
     }
   }
 

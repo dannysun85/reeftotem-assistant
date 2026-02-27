@@ -1,3 +1,5 @@
+import { useSettingsStore } from '@/stores/settings-store';
+
 // 动态导入invoke函数以避免模块加载问题
 let invokeCache: any = null;
 
@@ -82,28 +84,21 @@ export interface TencentTTSConfig {
   sampleRate: number;
 }
 
-// ASR识别结果接口
+// ASR识别结果接口 (matches Rust ASRResult with serde camelCase)
 export interface ASRResult {
+  success: boolean;
   text: string;
-  confidence: number;
-  startTime: number;
-  endTime: number;
-  words?: Array<{
-    word: string;
-    startTime: number;
-    endTime: number;
-    confidence: number;
-  }>;
+  requestId: string;
+  errorMessage: string | null;
 }
 
-// TTS合成结果接口
+// TTS合成结果接口 (matches Rust TTSResult with serde camelCase)
 export interface TTSResult {
-  audioData: ArrayBuffer;
-  text: string;
-  duration: number;
-  voiceType: number;
-  sampleRate: number;
-  timestamp: number;
+  success: boolean;
+  audioData: number[]; // Vec<u8> serialized as JSON array
+  contentType: string;
+  requestId: string;
+  errorMessage: string | null;
 }
 
 /**
@@ -141,9 +136,9 @@ export class TencentCloudVoiceService {
       region: import.meta.env.VITE_TENCENT_REGION || 'ap-beijing',
       appId: import.meta.env.VITE_TENCENT_APP_ID || '',
       voiceType: 1001, // 默认女声
-      volume: 1.0,
-      speed: 1.0,
-      pitch: 0.0,
+      volume: 5,       // 腾讯API: 0-10, 0=正常, 5=较大
+      speed: 0,        // 腾讯API: -2~6, 0=正常语速
+      pitch: 0,        // 不使用
       sampleRate: 16000
     };
 
@@ -224,14 +219,18 @@ export class TencentCloudVoiceService {
           audioData: Array.from(new Uint8Array(audioData))
         });
 
-        console.log('✅ 语音识别完成:', result);
-
-        // 验证识别结果
-        if (!result || !result.text || result.text.trim() === '') {
-          console.warn('⚠️ 识别结果为空，可能是音频质量问题或服务错误');
+        // Rust ASRResult: { success, text, requestId, errorMessage }
+        if (!result || !result.success) {
+          console.warn('⚠️ ASR 返回失败:', result?.errorMessage);
           return null;
         }
 
+        if (!result.text || result.text.trim() === '') {
+          console.warn('⚠️ 识别结果为空');
+          return null;
+        }
+
+        console.log('✅ 语音识别完成:', result.text);
         return result;
 
       } catch (invokeError: any) {
@@ -267,7 +266,7 @@ export class TencentCloudVoiceService {
    * 文本转语音
    * 使用腾讯云语音合成API
    */
-  async synthesizeSpeech(text: string): Promise<TTSResult | null> {
+  async synthesizeSpeech(inputText: string): Promise<TTSResult | null> {
     try {
       console.log('🔊 开始腾讯云语音合成...');
 
@@ -277,23 +276,34 @@ export class TencentCloudVoiceService {
       }
 
       // 验证输入文本
-      if (!text || text.trim() === '') {
+      if (!inputText || inputText.trim() === '') {
         throw new Error('文本内容不能为空');
       }
 
-      if (text.length > 10000) {
-        throw new Error('文本长度不能超过10000字符');
+      // TextToVoice API: 中文最多150字, 英文最多500字母
+      let text = inputText;
+      if (text.length > 150) {
+        console.warn(`[TTS] 文本超长 (${text.length} 字), 截断至 150 字`);
+        text = text.slice(0, 150);
       }
+
+      // 从设置 store 动态读取语音配置
+      const settings = useSettingsStore.getState();
+      const dynamicConfig = {
+        ...this.ttsConfig,
+        voiceType: parseInt(settings.voiceId) || this.ttsConfig.voiceType,
+        speed: settings.voiceSpeed,
+        volume: settings.voiceVolume,
+      };
 
       console.log('📝 配置检查通过，开始调用API...');
       console.log('📊 文本内容:', text.substring(0, 100) + (text.length > 100 ? '...' : ''));
-      console.log('🔧 TTS配置:', {
-        voiceType: this.ttsConfig.voiceType,
-        volume: this.ttsConfig.volume,
-        speed: this.ttsConfig.speed,
-        pitch: this.ttsConfig.pitch,
-        sampleRate: this.ttsConfig.sampleRate,
-        region: this.ttsConfig.region,
+      console.log('🔧 TTS配置 (动态):', {
+        voiceType: dynamicConfig.voiceType,
+        volume: dynamicConfig.volume,
+        speed: dynamicConfig.speed,
+        sampleRate: dynamicConfig.sampleRate,
+        region: dynamicConfig.region,
         appId: this.ttsConfig.appId ? '***' : '未配置'
       });
 
@@ -301,16 +311,28 @@ export class TencentCloudVoiceService {
       try {
         console.log('🔧 调用 tencent_tts 命令...');
         const result = await safeInvoke('tencent_tts', {
-          config: this.ttsConfig,
+          config: dynamicConfig,
           text: text
         });
 
-        console.log('✅ 语音合成完成，时长:', result.duration, 'ms');
-        console.log('🎵 音频数据大小:', result.audioData?.length || 0, 'bytes');
+        // Rust TTSResult: { success, audioData, contentType, requestId, errorMessage }
+        if (!result || !result.success) {
+          const errMsg = result?.errorMessage || '未知TTS错误';
+          console.warn('⚠️ TTS 返回失败:', errMsg);
+          return {
+            success: false,
+            audioData: [],
+            contentType: '',
+            requestId: result?.requestId || '',
+            errorMessage: errMsg,
+          };
+        }
 
-        // 验证合成结果
-        if (!result || !result.audioData || result.audioData.length === 0) {
-          console.warn('⚠️ 语音合成结果为空，可能是服务错误');
+        const dataLen = result.audioData?.length || 0;
+        console.log('✅ 语音合成完成，音频大小:', dataLen, 'bytes');
+
+        if (dataLen === 0) {
+          console.warn('⚠️ 语音合成结果为空');
           return null;
         }
 
@@ -345,7 +367,13 @@ export class TencentCloudVoiceService {
         console.log('💡 提示：Tauri API 不可用，请确保在 Tauri 环境中运行');
       }
 
-      return null;
+      return {
+        success: false,
+        audioData: [],
+        contentType: '',
+        requestId: '',
+        errorMessage: error?.message || '语音合成异常',
+      };
     }
   }
 

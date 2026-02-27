@@ -1,6 +1,7 @@
 // Tauri v2 模块化主文件
 // 按照官方文档最佳实践组织代码
 
+use std::collections::HashMap;
 use std::fs;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -14,14 +15,71 @@ use chrono;
 
 #[macro_use]
 mod logger;
+mod settings;
+mod ai;
+mod knowledge;
+mod workflow;
+mod skills;
+mod mcp;
+mod channels;
+mod cron;
+mod a2a;
+mod chat;
+mod openclaw;
 use serde::Deserialize;
 use tauri::Listener;
 
-
-
-// 应用状态，用于保持托盘图标存活
+// 应用状态
 pub struct AppState {
     pub tray_icon: Arc<Mutex<Option<TrayIcon>>>,
+    pub abort_handles: Arc<Mutex<HashMap<String, tokio::task::AbortHandle>>>,
+}
+
+/// Knowledge module state
+pub struct KnowledgeState {
+    pub db: knowledge::db::KnowledgeDb,
+}
+
+/// Workflow module state
+pub struct WorkflowState {
+    pub db: workflow::db::WorkflowDb,
+    pub cancel_flags: Arc<Mutex<HashMap<String, Arc<std::sync::atomic::AtomicBool>>>>,
+}
+
+/// Skills module state
+pub struct SkillState {
+    pub db: skills::db::SkillDb,
+}
+
+/// MCP tool registry state
+pub struct McpState {
+    pub registry: Arc<mcp::registry::ToolRegistry>,
+}
+
+/// Chat module state
+pub struct ChatState {
+    pub db: chat::db::ChatDb,
+}
+
+/// Channel module state
+pub struct ChannelState {
+    pub db: channels::db::ChannelDb,
+}
+
+/// Cron module state
+pub struct CronState {
+    pub db: cron::db::CronDb,
+}
+
+/// A2A (Agent-to-Agent) module state
+pub struct A2AState {
+    pub db: a2a::db::A2ADb,
+}
+
+/// OpenClaw sidecar state
+pub struct OpenClawState {
+    pub sidecar: std::sync::Arc<tokio::sync::Mutex<openclaw::sidecar::OpenClawSidecar>>,
+    pub ws_bridge: openclaw::ws::WsBridge,
 }
 
 // ========== 模块化组织 ==========
@@ -32,20 +90,27 @@ mod voice_service {
     use serde::{Deserialize, Serialize};
     use chrono::Utc;
     use base64::Engine;
+    use hmac::{Hmac, Mac};
+    use sha2::{Sha256, Digest};
+
+    type HmacSha256 = Hmac<Sha256>;
 
     /// 腾讯云语音识别配置
     #[derive(Debug, Clone, Serialize, Deserialize)]
+    #[serde(rename_all = "camelCase")]
     pub struct TencentASRConfig {
         pub secret_id: String,
         pub secret_key: String,
         pub region: String,
         pub app_id: String,
         pub engine_model_type: String,
-        pub voice_id: String,
+        #[serde(default)]
+        pub voice_id: Option<String>,
     }
 
     /// 腾讯云语音合成配置
     #[derive(Debug, Clone, Serialize, Deserialize)]
+    #[serde(rename_all = "camelCase")]
     pub struct TencentTTSConfig {
         pub secret_id: String,
         pub secret_key: String,
@@ -60,6 +125,7 @@ mod voice_service {
 
     /// ASR结果
     #[derive(Debug, Serialize, Deserialize)]
+    #[serde(rename_all = "camelCase")]
     pub struct ASRResult {
         pub success: bool,
         pub text: String,
@@ -69,6 +135,7 @@ mod voice_service {
 
     /// TTS结果
     #[derive(Debug, Serialize, Deserialize)]
+    #[serde(rename_all = "camelCase")]
     pub struct TTSResult {
         pub success: bool,
         pub audio_data: Vec<u8>,
@@ -77,11 +144,71 @@ mod voice_service {
         pub error_message: Option<String>,
     }
 
+    // ---- TC3-HMAC-SHA256 签名工具 ----
+
+    fn hmac_sha256(key: &[u8], data: &[u8]) -> Vec<u8> {
+        let mut mac = HmacSha256::new_from_slice(key)
+            .expect("HMAC can take key of any size");
+        mac.update(data);
+        mac.finalize().into_bytes().to_vec()
+    }
+
+    fn sha256_hex(data: &[u8]) -> String {
+        let mut hasher = Sha256::new();
+        hasher.update(data);
+        hex::encode(hasher.finalize())
+    }
+
+    /// 生成腾讯云 TC3-HMAC-SHA256 Authorization 头
+    /// 参考: https://cloud.tencent.com/document/api/1073/37991
+    fn tc3_authorization(
+        secret_id: &str,
+        secret_key: &str,
+        service: &str,    // "asr" 或 "tts"
+        host: &str,        // "asr.tencentcloudapi.com"
+        timestamp: u64,
+        body: &str,
+    ) -> String {
+        let date = chrono::DateTime::from_timestamp(timestamp as i64, 0)
+            .unwrap()
+            .format("%Y-%m-%d")
+            .to_string();
+
+        // Step 1: 拼接规范请求串 CanonicalRequest
+        let hashed_payload = sha256_hex(body.as_bytes());
+        let canonical_request = format!(
+            "POST\n/\n\ncontent-type:application/json\nhost:{}\n\ncontent-type;host\n{}",
+            host, hashed_payload
+        );
+
+        // Step 2: 拼接待签名字符串 StringToSign
+        let credential_scope = format!("{}/{}/tc3_request", date, service);
+        let hashed_canonical = sha256_hex(canonical_request.as_bytes());
+        let string_to_sign = format!(
+            "TC3-HMAC-SHA256\n{}\n{}\n{}",
+            timestamp, credential_scope, hashed_canonical
+        );
+
+        // Step 3: 计算签名
+        let secret_date = hmac_sha256(
+            format!("TC3{}", secret_key).as_bytes(),
+            date.as_bytes(),
+        );
+        let secret_service = hmac_sha256(&secret_date, service.as_bytes());
+        let secret_signing = hmac_sha256(&secret_service, b"tc3_request");
+        let signature = hex::encode(hmac_sha256(&secret_signing, string_to_sign.as_bytes()));
+
+        // Step 4: 拼接 Authorization
+        format!(
+            "TC3-HMAC-SHA256 Credential={}/{}, SignedHeaders=content-type;host, Signature={}",
+            secret_id, credential_scope, signature
+        )
+    }
+
     /// 腾讯云ASR语音识别
     pub async fn tencent_asr(config: TencentASRConfig, audio_data: Vec<u8>) -> Result<ASRResult, String> {
         app_info!("🎤 开始腾讯云ASR语音识别");
 
-        // 检查音频数据大小
         if audio_data.is_empty() {
             return Ok(ASRResult {
                 success: false,
@@ -91,20 +218,13 @@ mod voice_service {
             });
         }
 
-        // 构建请求参数
         let timestamp = Utc::now().timestamp() as u64;
-        let mut header_map = reqwest::header::HeaderMap::new();
-        header_map.insert("Content-Type", "application/json".parse().unwrap());
-        header_map.insert("Host", "asr.tencentcloudapi.com".parse().unwrap());
-        header_map.insert("X-TC-Action", "SentenceRecognition".parse().unwrap());
-        header_map.insert("X-TC-Version", "2019-06-14".parse().unwrap());
-        header_map.insert("X-TC-Region", config.region.parse().unwrap());
-        header_map.insert("X-TC-Timestamp", timestamp.to_string().parse().unwrap());
+        let host = "asr.tencentcloudapi.com";
 
         // 构建请求体
         let request_body = serde_json::json!({
             "ProjectId": 0,
-            "SubServiceType": "sentence",
+            "SubServiceType": 2,
             "EngSerViceType": config.engine_model_type,
             "SourceType": 1,
             "VoiceFormat": "pcm",
@@ -112,22 +232,30 @@ mod voice_service {
             "Data": base64::engine::general_purpose::STANDARD.encode(&audio_data),
             "DataLen": audio_data.len()
         });
-
         let body_str = request_body.to_string();
 
-        // 创建简化的Authorization头
-        let auth_header = format!(
-            "TC3-HMAC-SHA256 Credential={}/{}/asr/tc3_request, SignedHeaders=content-type;host, Signature=test_signature",
-            config.secret_id,
-            chrono::DateTime::from_timestamp(timestamp as i64, 0).unwrap().format("%Y-%m-%d")
+        // TC3 签名
+        let authorization = tc3_authorization(
+            &config.secret_id,
+            &config.secret_key,
+            "asr",
+            host,
+            timestamp,
+            &body_str,
         );
 
-        header_map.insert("Authorization", auth_header.parse().unwrap());
+        let mut header_map = reqwest::header::HeaderMap::new();
+        header_map.insert("Content-Type", "application/json".parse().map_err(|e: reqwest::header::InvalidHeaderValue| format!("Invalid Content-Type header: {}", e))?);
+        header_map.insert("Host", host.parse().map_err(|e: reqwest::header::InvalidHeaderValue| format!("Invalid Host header: {}", e))?);
+        header_map.insert("X-TC-Action", "SentenceRecognition".parse().map_err(|e: reqwest::header::InvalidHeaderValue| format!("Invalid Action header: {}", e))?);
+        header_map.insert("X-TC-Version", "2019-06-14".parse().map_err(|e: reqwest::header::InvalidHeaderValue| format!("Invalid Version header: {}", e))?);
+        header_map.insert("X-TC-Region", config.region.parse().map_err(|e: reqwest::header::InvalidHeaderValue| format!("Invalid Region header: {}", e))?);
+        header_map.insert("X-TC-Timestamp", timestamp.to_string().parse().map_err(|e: reqwest::header::InvalidHeaderValue| format!("Invalid Timestamp header: {}", e))?);
+        header_map.insert("Authorization", authorization.parse().map_err(|e: reqwest::header::InvalidHeaderValue| format!("Invalid Authorization header: {}", e))?);
 
-        // 发送HTTP请求
         let client = reqwest::Client::new();
         let response = client
-            .post("https://asr.tencentcloudapi.com/")
+            .post(format!("https://{}/", host))
             .headers(header_map)
             .body(body_str)
             .send()
@@ -141,14 +269,12 @@ mod voice_service {
 
         app_info!("🔍 ASR响应: {}", response_text);
 
-        // 解析响应
         let response_json: serde_json::Value = serde_json::from_str(&response_text)
             .map_err(|e| format!("响应解析失败: {}", e))?;
 
         if let Some(error) = response_json.get("Response").and_then(|r| r.get("Error")) {
             let error_code = error.get("Code").and_then(|c| c.as_str()).unwrap_or("UNKNOWN");
             let error_message = error.get("Message").and_then(|m| m.as_str()).unwrap_or("未知错误");
-
             return Ok(ASRResult {
                 success: false,
                 text: String::new(),
@@ -176,76 +302,87 @@ mod voice_service {
         app_info!("🔊 开始腾讯云TTS语音合成: {}", text);
 
         let timestamp = Utc::now().timestamp() as u64;
-        let mut header_map = reqwest::header::HeaderMap::new();
-        header_map.insert("Content-Type", "application/json".parse().unwrap());
-        header_map.insert("Host", "tts.tencentcloudapi.com".parse().unwrap());
-        header_map.insert("X-TC-Action", "TextToStreamAudio".parse().unwrap());
-        header_map.insert("X-TC-Version", "2019-07-23".parse().unwrap());
-        header_map.insert("X-TC-Region", config.region.parse().unwrap());
-        header_map.insert("X-TC-Timestamp", timestamp.to_string().parse().unwrap());
+        let host = "tts.tencentcloudapi.com";
 
-        // 构建请求体
         let request_body = serde_json::json!({
-            "Text": base64::engine::general_purpose::STANDARD.encode(text.as_bytes()),
+            "Text": text,
             "SessionId": uuid::Uuid::new_v4().to_string(),
-            "ModelType": 1,
-            "VoiceType": config.voice_type.unwrap_or(10010001), // 默认女声
-            "Language": config.language.unwrap_or(1), // 中文
-            "Speed": config.speed.unwrap_or(1.2),
-            "Volume": config.volume.unwrap_or(5.0),
-            "Pitch": config.pitch.unwrap_or(0)
+            "Codec": "wav",
+            "VoiceType": config.voice_type.unwrap_or(1001),
+            "PrimaryLanguage": config.language.unwrap_or(1),
+            "Speed": config.speed.unwrap_or(0.0),
+            "Volume": config.volume.unwrap_or(5.0)
         });
-
         let body_str = request_body.to_string();
 
-        // 创建简化的Authorization头
-        let auth_header = format!(
-            "TC3-HMAC-SHA256 Credential={}/{}/tts/tc3_request, SignedHeaders=content-type;host, Signature=test_signature",
-            config.secret_id,
-            chrono::DateTime::from_timestamp(timestamp as i64, 0).unwrap().format("%Y-%m-%d")
+        // TC3 签名
+        let authorization = tc3_authorization(
+            &config.secret_id,
+            &config.secret_key,
+            "tts",
+            host,
+            timestamp,
+            &body_str,
         );
 
-        header_map.insert("Authorization", auth_header.parse().unwrap());
+        let mut header_map = reqwest::header::HeaderMap::new();
+        header_map.insert("Content-Type", "application/json".parse().map_err(|e: reqwest::header::InvalidHeaderValue| format!("Invalid Content-Type header: {}", e))?);
+        header_map.insert("Host", host.parse().map_err(|e: reqwest::header::InvalidHeaderValue| format!("Invalid Host header: {}", e))?);
+        header_map.insert("X-TC-Action", "TextToVoice".parse().map_err(|e: reqwest::header::InvalidHeaderValue| format!("Invalid Action header: {}", e))?);
+        header_map.insert("X-TC-Version", "2019-08-23".parse().map_err(|e: reqwest::header::InvalidHeaderValue| format!("Invalid Version header: {}", e))?);
+        header_map.insert("X-TC-Region", config.region.parse().map_err(|e: reqwest::header::InvalidHeaderValue| format!("Invalid Region header: {}", e))?);
+        header_map.insert("X-TC-Timestamp", timestamp.to_string().parse().map_err(|e: reqwest::header::InvalidHeaderValue| format!("Invalid Timestamp header: {}", e))?);
+        header_map.insert("Authorization", authorization.parse().map_err(|e: reqwest::header::InvalidHeaderValue| format!("Invalid Authorization header: {}", e))?);
 
-        // 发送HTTP请求
         let client = reqwest::Client::new();
         let response = client
-            .post("https://tts.tencentcloudapi.com/")
+            .post(format!("https://{}/", host))
             .headers(header_map)
             .body(body_str)
             .send()
             .await
             .map_err(|e| format!("TTS HTTP请求失败: {}", e))?;
 
-        let response_bytes = response
-            .bytes()
+        let response_text = response
+            .text()
             .await
             .map_err(|e| format!("TTS响应读取失败: {}", e))?;
 
-        // 如果响应是JSON，说明是错误
-        if let Ok(response_text) = String::from_utf8(response_bytes.to_vec()) {
-            if response_text.starts_with('{') {
-                if let Ok(response_json) = serde_json::from_str::<serde_json::Value>(&response_text) {
-                    if let Some(error) = response_json.get("Response").and_then(|r| r.get("Error")) {
-                        let error_code = error.get("Code").and_then(|c| c.as_str()).unwrap_or("UNKNOWN");
-                        let error_message = error.get("Message").and_then(|m| m.as_str()).unwrap_or("未知错误");
+        app_info!("🔍 TTS响应长度: {} bytes", response_text.len());
 
-                        return Ok(TTSResult {
-                            success: false,
-                            audio_data: Vec::new(),
-                            content_type: "application/json".to_string(),
-                            request_id: uuid::Uuid::new_v4().to_string(),
-                            error_message: Some(format!("TTS错误 [{}]: {}", error_code, error_message)),
-                        });
-                    }
-                }
-            }
+        let response_json: serde_json::Value = serde_json::from_str(&response_text)
+            .map_err(|e| format!("TTS响应解析失败: {}", e))?;
+
+        // Check for API error
+        if let Some(error) = response_json.get("Response").and_then(|r| r.get("Error")) {
+            let error_code = error.get("Code").and_then(|c| c.as_str()).unwrap_or("UNKNOWN");
+            let error_message = error.get("Message").and_then(|m| m.as_str()).unwrap_or("未知错误");
+            return Ok(TTSResult {
+                success: false,
+                audio_data: Vec::new(),
+                content_type: "application/json".to_string(),
+                request_id: uuid::Uuid::new_v4().to_string(),
+                error_message: Some(format!("TTS错误 [{}]: {}", error_code, error_message)),
+            });
         }
+
+        // TextToVoice returns JSON: { Response: { Audio: "base64...", SessionId, RequestId } }
+        let audio_b64 = response_json
+            .get("Response")
+            .and_then(|r| r.get("Audio"))
+            .and_then(|a| a.as_str())
+            .ok_or("TTS响应中缺少 Audio 字段")?;
+
+        let audio_data = base64::engine::general_purpose::STANDARD
+            .decode(audio_b64)
+            .map_err(|e| format!("TTS音频base64解码失败: {}", e))?;
+
+        app_info!("✅ TTS音频解码完成，大小: {} bytes", audio_data.len());
 
         Ok(TTSResult {
             success: true,
-            audio_data: response_bytes.to_vec(),
-            content_type: "audio/octet-stream".to_string(),
+            audio_data,
+            content_type: "audio/wav".to_string(),
             request_id: uuid::Uuid::new_v4().to_string(),
             error_message: None,
         })
@@ -715,20 +852,20 @@ mod screen_edge_detection {
         // 约束Y坐标
         if y < constraints.min_y {
             constrained_y = constraints.min_y;
-            if constraint_edge.is_none() {
-                constraint_edge = Some("top".to_string());
-            } else {
+            if let Some(ref edge) = constraint_edge {
                 // 角落情况
-                constraint_edge = Some(format!("{}-top", constraint_edge.unwrap()));
+                constraint_edge = Some(format!("{}-top", edge));
+            } else {
+                constraint_edge = Some("top".to_string());
             }
             is_constrained = true;
         } else if y > constraints.max_y {
             constrained_y = constraints.max_y;
-            if constraint_edge.is_none() {
-                constraint_edge = Some("bottom".to_string());
-            } else {
+            if let Some(ref edge) = constraint_edge {
                 // 角落情况
-                constraint_edge = Some(format!("{}-bottom", constraint_edge.unwrap()));
+                constraint_edge = Some(format!("{}-bottom", edge));
+            } else {
+                constraint_edge = Some("bottom".to_string());
             }
             is_constrained = true;
         }
@@ -1121,12 +1258,120 @@ async fn debug_right_click_menu(model_name: String) -> Result<(), String> {
     Ok(())
 }
 
+// ========== Spotlight 命令 ==========
+
+#[tauri::command]
+async fn spotlight_show(app: AppHandle) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window("spotlight") {
+        window.show().map_err(|e| e.to_string())?;
+        window.set_focus().map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn spotlight_hide(app: AppHandle) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window("spotlight") {
+        window.hide().map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn spotlight_detect_clipboard(app: AppHandle) -> Result<serde_json::Value, String> {
+    use tauri_plugin_clipboard_manager::ClipboardExt;
+
+    match app.clipboard().read_text() {
+        Ok(text) => {
+            if text.is_empty() {
+                Ok(serde_json::json!({ "type": "none", "preview": "" }))
+            } else {
+                // Truncate preview to 200 chars
+                let preview: String = text.chars().take(200).collect();
+                Ok(serde_json::json!({ "type": "text", "preview": preview }))
+            }
+        }
+        Err(_) => {
+            Ok(serde_json::json!({ "type": "none", "preview": "" }))
+        }
+    }
+}
+
+// ========== 自动更新命令 ==========
+
+#[tauri::command]
+async fn check_for_update(app: AppHandle) -> Result<Option<serde_json::Value>, String> {
+    use tauri_plugin_updater::UpdaterExt;
+
+    let updater = app.updater_builder().build().map_err(|e| e.to_string())?;
+
+    match updater.check().await {
+        Ok(Some(update)) => {
+            Ok(Some(serde_json::json!({
+                "version": update.version,
+                "body": update.body,
+                "date": update.date.map(|d| d.to_string()),
+                "currentVersion": update.current_version,
+            })))
+        }
+        Ok(None) => Ok(None),
+        Err(e) => {
+            app_warn!("Update check failed: {}", e);
+            Err(format!("Failed to check for updates: {}", e))
+        }
+    }
+}
+
+#[tauri::command]
+async fn download_and_install_update(app: AppHandle) -> Result<(), String> {
+    use tauri_plugin_updater::UpdaterExt;
+
+    let updater = app.updater_builder().build().map_err(|e| e.to_string())?;
+
+    let update = updater
+        .check()
+        .await
+        .map_err(|e| format!("Update check failed: {}", e))?
+        .ok_or_else(|| "No update available".to_string())?;
+
+    let mut downloaded: u64 = 0;
+    let app_clone = app.clone();
+
+    update
+        .download_and_install(
+            move |chunk_length, content_length| {
+                downloaded += chunk_length as u64;
+                let progress = content_length.map(|total| {
+                    (downloaded as f64 / total as f64 * 100.0).min(100.0) as u32
+                });
+                let _ = app_clone.emit(
+                    "update_download_progress",
+                    serde_json::json!({
+                        "downloaded": downloaded,
+                        "total": content_length,
+                        "progress": progress.unwrap_or(0),
+                    }),
+                );
+            },
+            || {
+                // Download finished, installation will proceed
+            },
+        )
+        .await
+        .map_err(|e| format!("Update install failed: {}", e))?;
+
+    Ok(())
+}
+
 // ========== 主应用入口 ==========
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_clipboard_manager::init())
         .invoke_handler(tauri::generate_handler![
             greet,
             trigger_show_animation,
@@ -1162,6 +1407,7 @@ pub fn run() {
               // Live2D语音交互命令
             trigger_live2d_expression,
             trigger_live2d_lip_sync,
+            set_live2d_lip_sync_level,
             trigger_live2d_motion,
             // 资源读取命令
             read_resource_file,
@@ -1173,6 +1419,114 @@ pub fn run() {
             synthesize_voice_official,
             test_voice_recognition,
             test_voice_synthesis,
+            // 设置管理命令
+            get_settings,
+            save_app_settings,
+            get_providers,
+            save_provider,
+            delete_provider,
+            // Agent 管理命令
+            get_agents,
+            save_agent,
+            delete_agent,
+            set_active_agent,
+            get_active_agent_id,
+            // Provider 管理命令
+            set_default_provider,
+            get_default_provider,
+            // API Key 管理命令
+            save_api_key,
+            get_api_key,
+            delete_api_key,
+            // AI 对话命令
+            ai_chat_send,
+            ai_chat_abort,
+            ai_get_models,
+            provider_validate_key,
+            // Knowledge 知识库命令
+            knowledge::commands::knowledge_list,
+            knowledge::commands::knowledge_get,
+            knowledge::commands::knowledge_create,
+            knowledge::commands::knowledge_update,
+            knowledge::commands::knowledge_delete,
+            knowledge::commands::knowledge_list_documents,
+            knowledge::commands::knowledge_get_document,
+            knowledge::commands::knowledge_delete_document,
+            knowledge::commands::knowledge_add_document,
+            knowledge::commands::knowledge_add_url,
+            knowledge::commands::knowledge_reprocess_document,
+            knowledge::commands::knowledge_remove_document,
+            knowledge::commands::knowledge_search,
+            knowledge::commands::knowledge_rag,
+            knowledge::commands::knowledge_get_embedding_options,
+            knowledge::commands::knowledge_detect_dimension,
+            knowledge::commands::knowledge_refresh_stats,
+            knowledge::commands::knowledge_get_watch_status,
+            knowledge::commands::knowledge_set_watch_folder,
+            // OpenClaw 命令
+            openclaw::commands::get_openclaw_status,
+            openclaw::commands::check_nodejs,
+            openclaw::commands::check_openclaw,
+            openclaw::commands::install_openclaw,
+            // Channel 命令 (原生)
+            channels::commands::channel_list,
+            channels::commands::channel_add,
+            channels::commands::channel_remove,
+            channels::commands::channel_update,
+            channels::commands::channel_validate,
+            channels::commands::channel_status,
+            channels::commands::channel_bind_agent,
+            channels::commands::channel_unbind_agent,
+            // Skill 命令
+            skills::commands::skill_list,
+            skills::commands::skill_toggle,
+            skills::commands::skill_update_config,
+            skills::commands::skill_search_marketplace,
+            skills::commands::skill_install,
+            skills::commands::skill_uninstall,
+            // MCP 工具命令
+            mcp::commands::mcp_list_tools,
+            mcp::commands::mcp_get_tool,
+            mcp::commands::mcp_call_tool,
+            // Cron 命令 (原生)
+            cron::commands::cron_list,
+            cron::commands::cron_add,
+            cron::commands::cron_remove,
+            cron::commands::cron_toggle,
+            cron::commands::cron_run,
+            cron::commands::cron_status,
+            // A2A (Agent-to-Agent) 命令
+            a2a::commands::a2a_delegate,
+            a2a::commands::a2a_list,
+            a2a::commands::a2a_get,
+            a2a::commands::a2a_cancel,
+            // Workflow 工作流命令
+            workflow::commands::workflow_list,
+            workflow::commands::workflow_get,
+            workflow::commands::workflow_create,
+            workflow::commands::workflow_update,
+            workflow::commands::workflow_delete,
+            workflow::commands::workflow_list_runs,
+            workflow::commands::workflow_get_run,
+            workflow::commands::workflow_delete_run,
+            workflow::commands::workflow_clear_runs,
+            workflow::commands::workflow_run,
+            workflow::commands::workflow_cancel,
+            // Chat 会话持久化命令
+            chat::commands::chat_session_list,
+            chat::commands::chat_session_create,
+            chat::commands::chat_session_rename,
+            chat::commands::chat_session_delete,
+            chat::commands::chat_message_list,
+            chat::commands::chat_message_save,
+            chat::commands::chat_message_clear,
+            // Spotlight 命令
+            spotlight_show,
+            spotlight_hide,
+            spotlight_detect_clipboard,
+            // 自动更新命令
+            check_for_update,
+            download_and_install_update,
         ])
         .setup(|app| {
             app_info!("🚀 Tauri应用启动");
@@ -1210,10 +1564,74 @@ pub fn run() {
                 }
             });
 
-    
+
+            // 初始化 Knowledge 模块
+            let data_dir = app.path().app_data_dir()?;
+            let knowledge_db = knowledge::db::KnowledgeDb::new(data_dir.join("knowledge"));
+            app.manage(KnowledgeState { db: knowledge_db });
+
+            // 初始化 Workflow 模块
+            let workflow_db = workflow::db::WorkflowDb::new(data_dir.join("workflow"));
+            app.manage(WorkflowState {
+                db: workflow_db,
+                cancel_flags: Arc::new(Mutex::new(HashMap::new())),
+            });
+
+            // 初始化 Skills 模块
+            let skill_db = skills::db::SkillDb::new(data_dir.join("skills"))
+                .map_err(|e| Box::<dyn std::error::Error>::from(e))?;
+            // Seed built-in skills
+            let builtin = skills::registry::builtin_skills();
+            if let Err(e) = skill_db.seed_if_empty(builtin) {
+                app_error!("Failed to seed skills: {}", e);
+            }
+            app.manage(SkillState { db: skill_db });
+
+            // 初始化 MCP 工具注册表
+            let registry = mcp::builtin::create_builtin_registry();
+            app.manage(McpState {
+                registry: Arc::new(registry),
+            });
+
+            // 初始化 Chat 模块
+            let chat_db = chat::db::ChatDb::new(data_dir.join("chat"))
+                .map_err(|e| Box::<dyn std::error::Error>::from(e))?;
+            app.manage(ChatState { db: chat_db });
+
+            // 初始化 Channel 模块
+            let channel_db = channels::db::ChannelDb::new(data_dir.join("channels"))
+                .map_err(|e| Box::<dyn std::error::Error>::from(e))?;
+            app.manage(ChannelState { db: channel_db });
+
+            // 初始化 Cron 模块
+            let cron_db = cron::db::CronDb::new(data_dir.join("cron"))
+                .map_err(|e| Box::<dyn std::error::Error>::from(e))?;
+            app.manage(CronState { db: cron_db });
+
+            // 初始化 A2A (Agent-to-Agent) 模块
+            let a2a_db = a2a::db::A2ADb::new(data_dir.join("a2a.db")).map_err(|e| e.to_string())?;
+            app.manage(A2AState { db: a2a_db });
+
+            // 初始化 OpenClaw sidecar 模块
+            let openclaw_sidecar = std::sync::Arc::new(
+                tokio::sync::Mutex::new(openclaw::sidecar::OpenClawSidecar::new())
+            );
+            let ws_bridge = openclaw::ws::WsBridge::new();
+            app.manage(OpenClawState {
+                sidecar: openclaw_sidecar.clone(),
+                ws_bridge,
+            });
+
+            // 启动 OpenClaw 进程监控
+            openclaw::sidecar::spawn_monitor(openclaw_sidecar.clone(), app.handle().clone());
+
+            // 自动检测、安装、启动 OpenClaw (后台异步，不阻塞启动)
+            openclaw::sidecar::spawn_auto_bootstrap(openclaw_sidecar, app.handle().clone());
+
             // 创建应用状态
             let app_state = AppState {
                 tray_icon: Arc::new(Mutex::new(None)),
+                abort_handles: Arc::new(Mutex::new(HashMap::new())),
             };
 
             // 创建共享状态
@@ -1263,6 +1681,8 @@ fn initialize_windows(
         }) {
             app_error!("窗口定位失败: {}", e);
         }
+
+        app_info!("✅ Live2D 窗口初始化完成");
     });
 
     Ok(())
@@ -1478,6 +1898,16 @@ async fn trigger_live2d_lip_sync(app: AppHandle, text: String, lip_sync_data: se
     Ok(())
 }
 
+/// Lightweight lip sync level command - called at ~20fps during TTS playback, no logging
+#[tauri::command]
+async fn set_live2d_lip_sync_level(app: AppHandle, level: f64) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window("live2d") {
+        window.emit("live2d_lip_sync_level", level)
+            .map_err(|e| format!("发送口型同步级别失败: {}", e))?;
+    }
+    Ok(())
+}
+
 #[tauri::command]
 async fn trigger_live2d_motion(app: AppHandle, motion: String) -> Result<(), String> {
     app_info!("🎬 触发Live2D动作: {}", motion);
@@ -1612,6 +2042,454 @@ async fn test_voice_synthesis(text: String) -> Result<String, String> {
     // 这里可以添加简单的测试逻辑
     Ok(format!("语音合成测试完成: {}", text))
 }
+
+// ========== 设置管理命令 ==========
+
+/// 获取应用设置
+#[tauri::command]
+async fn get_settings(app: AppHandle) -> Result<settings::AppSettings, String> {
+    settings::load_settings(&app)
+}
+
+/// 保存应用设置
+#[tauri::command]
+async fn save_app_settings(app: AppHandle, settings_data: settings::AppSettings) -> Result<(), String> {
+    settings::save_settings(&app, &settings_data)
+}
+
+/// 获取提供者列表（附加 API Key 信息）
+#[tauri::command]
+async fn get_providers(app: AppHandle) -> Result<Vec<settings::ProviderWithKeyInfo>, String> {
+    let s = settings::load_settings(&app)?;
+    let keys = settings::load_api_keys(&app).unwrap_or_default();
+
+    let providers_with_info: Vec<settings::ProviderWithKeyInfo> = s
+        .providers
+        .into_iter()
+        .map(|p| {
+            let key = keys.get(&p.id);
+            let has_key = key.map_or(false, |k| !k.is_empty());
+            let key_masked = key.map(|k| settings::mask_api_key(k));
+            settings::ProviderWithKeyInfo {
+                provider: p,
+                has_key,
+                key_masked,
+            }
+        })
+        .collect();
+
+    Ok(providers_with_info)
+}
+
+/// 新增或更新提供者（按 id 匹配）
+#[tauri::command]
+async fn save_provider(app: AppHandle, provider: settings::ProviderConfig) -> Result<(), String> {
+    let mut s = settings::load_settings(&app)?;
+    if let Some(existing) = s.providers.iter_mut().find(|p| p.id == provider.id) {
+        *existing = provider;
+    } else {
+        s.providers.push(provider);
+    }
+    settings::save_settings(&app, &s)
+}
+
+/// 删除提供者（按 id 匹配）
+#[tauri::command]
+async fn delete_provider(app: AppHandle, id: String) -> Result<(), String> {
+    let mut s = settings::load_settings(&app)?;
+    let original_len = s.providers.len();
+    s.providers.retain(|p| p.id != id);
+    if s.providers.len() == original_len {
+        return Err(format!("未找到 id 为 {} 的提供者", id));
+    }
+    settings::save_settings(&app, &s)
+}
+
+// ========== Agent 管理命令 ==========
+
+/// 获取所有 Agent
+#[tauri::command]
+async fn get_agents(app: AppHandle) -> Result<Vec<settings::AgentConfig>, String> {
+    let s = settings::load_settings(&app)?;
+    Ok(s.agents)
+}
+
+/// 保存（新建或更新）Agent
+#[tauri::command]
+async fn save_agent(app: AppHandle, agent: settings::AgentConfig) -> Result<(), String> {
+    let mut s = settings::load_settings(&app)?;
+    if let Some(existing) = s.agents.iter_mut().find(|a| a.id == agent.id) {
+        *existing = agent;
+    } else {
+        s.agents.push(agent);
+    }
+    settings::save_settings(&app, &s)
+}
+
+/// 删除 Agent
+#[tauri::command]
+async fn delete_agent(app: AppHandle, id: String) -> Result<(), String> {
+    let mut s = settings::load_settings(&app)?;
+    let original_len = s.agents.len();
+    s.agents.retain(|a| a.id != id);
+    if s.agents.len() == original_len {
+        return Err(format!("未找到 id 为 {} 的 Agent", id));
+    }
+    // If active agent was deleted, clear it
+    if s.active_agent_id.as_deref() == Some(&id) {
+        s.active_agent_id = None;
+    }
+    settings::save_settings(&app, &s)
+}
+
+/// 设置活跃 Agent
+#[tauri::command]
+async fn set_active_agent(app: AppHandle, id: String) -> Result<(), String> {
+    let mut s = settings::load_settings(&app)?;
+    s.active_agent_id = Some(id);
+    settings::save_settings(&app, &s)
+}
+
+/// 获取活跃 Agent ID
+#[tauri::command]
+async fn get_active_agent_id(app: AppHandle) -> Result<Option<String>, String> {
+    let s = settings::load_settings(&app)?;
+    Ok(s.active_agent_id)
+}
+
+/// 设置默认 Provider
+#[tauri::command]
+async fn set_default_provider(app: AppHandle, id: String) -> Result<(), String> {
+    let mut s = settings::load_settings(&app)?;
+    s.default_provider_id = Some(id);
+    settings::save_settings(&app, &s)
+}
+
+/// 获取默认 Provider ID
+#[tauri::command]
+async fn get_default_provider(app: AppHandle) -> Result<Option<String>, String> {
+    let s = settings::load_settings(&app)?;
+    Ok(s.default_provider_id)
+}
+
+// ========== API Key 管理命令 ==========
+
+/// 保存 API Key
+#[tauri::command]
+async fn save_api_key(app: AppHandle, provider_id: String, api_key: String) -> Result<(), String> {
+    let mut keys = settings::load_api_keys(&app).unwrap_or_default();
+    keys.insert(provider_id, api_key);
+    settings::save_api_keys(&app, &keys)
+}
+
+/// 获取 API Key
+#[tauri::command]
+async fn get_api_key(app: AppHandle, provider_id: String) -> Result<Option<String>, String> {
+    let keys = settings::load_api_keys(&app).unwrap_or_default();
+    Ok(keys.get(&provider_id).cloned())
+}
+
+/// 删除 API Key
+#[tauri::command]
+async fn delete_api_key(app: AppHandle, provider_id: String) -> Result<(), String> {
+    let mut keys = settings::load_api_keys(&app).unwrap_or_default();
+    keys.remove(&provider_id);
+    settings::save_api_keys(&app, &keys)
+}
+
+// ========== AI 对话命令 ==========
+
+/// 发送 AI 对话请求（流式，支持 Tool Calling）
+/// 优先走 OpenClaw RPC（完整能力），降级到本地 HTTP 流式传输。
+#[tauri::command]
+async fn ai_chat_send(app: AppHandle, mut request: ai::types::AiChatRequest) -> Result<(), String> {
+    let session_key = request.session_key.clone();
+
+    // --- Try OpenClaw route first ---
+    {
+        let state = app.state::<OpenClawState>();
+        if state.ws_bridge.is_connected().await {
+            // OpenClaw chat.send expects a single message string, not messages[]
+            let last_msg = request.messages.iter().rev()
+                .find(|m| m.role == "user")
+                .map(|m| m.content.clone())
+                .unwrap_or_default();
+
+            let rpc_params = serde_json::json!({
+                "sessionKey": &request.session_key,
+                "message": last_msg,
+                "idempotencyKey": uuid::Uuid::new_v4().to_string(),
+            });
+            app_info!("Routing chat to OpenClaw: session={}", session_key);
+            match state.ws_bridge.rpc("chat.send", Some(rpc_params), 60_000).await {
+                Ok(_) => return Ok(()), // Stream responses arrive via WS events
+                Err(e) => {
+                    app_warn!("OpenClaw chat.send failed, falling back to native: {}", e);
+                }
+            }
+        }
+    }
+
+    // --- Native fallback ---
+    app_info!("🤖 AI 对话请求 (native): provider={}, session={}, messages={}",
+        request.provider_id, session_key, request.messages.len());
+
+    // Load provider config and API key
+    let s = settings::load_settings(&app)?;
+    app_info!("📋 已加载 {} 个 Provider", s.providers.len());
+
+    let provider = s
+        .providers
+        .iter()
+        .find(|p| p.id == request.provider_id)
+        .ok_or_else(|| {
+            let ids: Vec<&str> = s.providers.iter().map(|p| p.id.as_str()).collect();
+            format!("未找到 Provider '{}', 可用: {:?}", request.provider_id, ids)
+        })?
+        .clone();
+
+    let keys = settings::load_api_keys(&app).unwrap_or_default();
+    let api_key = keys.get(&request.provider_id).cloned();
+    app_info!("🔑 Provider '{}' (type={}), API Key: {}",
+        provider.id, provider.provider_type,
+        if api_key.is_some() { "已配置" } else { "未配置" });
+
+    // --- Inject tools from active agent's skills ---
+    if request.tools.is_none() {
+        // Find the active agent
+        let active_agent = s.agents.iter().find(|a| {
+            s.active_agent_id.as_deref() == Some(&a.id)
+        }).or_else(|| s.agents.iter().find(|a| a.is_default));
+
+        if let Some(agent) = active_agent {
+            if !agent.skill_ids.is_empty() {
+                if let Some(skill_state) = app.try_state::<SkillState>() {
+                    if let Ok(all_skills) = skill_state.db.list() {
+                        let mut tool_names: Vec<String> = Vec::new();
+                        for skill in &all_skills {
+                            if skill.enabled && agent.skill_ids.contains(&skill.id) {
+                                for tool in &skill.tools {
+                                    tool_names.push(tool.name.clone());
+                                }
+                            }
+                        }
+                        if !tool_names.is_empty() {
+                            if let Some(mcp_state) = app.try_state::<McpState>() {
+                                let tools = mcp_state.registry.get_tools_by_names(&tool_names);
+                                if !tools.is_empty() {
+                                    app_info!("🔧 注入 {} 个工具到 AI 请求", tools.len());
+                                    request.tools = Some(tools);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let has_tools = request.tools.as_ref().map_or(false, |t| !t.is_empty());
+    let app_clone = app.clone();
+    let session_key_clone = session_key.clone();
+
+    let task = tokio::spawn(async move {
+        let result = if has_tools {
+            ai::send_chat_stream_with_tools(
+                &app_clone,
+                &provider,
+                api_key.as_deref(),
+                &request,
+            )
+            .await
+        } else {
+            ai::send_chat_stream(
+                &app_clone,
+                &provider,
+                api_key.as_deref(),
+                &request,
+            )
+            .await
+        };
+
+        if let Err(e) = result {
+            let _ = app_clone.emit(
+                "ai_chat_error",
+                ai::types::ChatErrorEvent {
+                    session_key: session_key_clone,
+                    error: e,
+                },
+            );
+        }
+    });
+
+    // Store abort handle
+    if let Some(state) = app.try_state::<AppState>() {
+        if let Ok(mut handles) = state.abort_handles.lock() {
+            handles.insert(session_key, task.abort_handle());
+        }
+    }
+
+    Ok(())
+}
+
+/// 中止 AI 对话
+#[tauri::command]
+async fn ai_chat_abort(app: AppHandle, session_key: String) -> Result<(), String> {
+    if let Some(state) = app.try_state::<AppState>() {
+        if let Ok(mut handles) = state.abort_handles.lock() {
+            if let Some(handle) = handles.remove(&session_key) {
+                handle.abort();
+                app_info!("已中止 AI 对话: {}", session_key);
+            }
+        }
+    }
+    Ok(())
+}
+
+/// 获取模型列表（Ollama）
+#[tauri::command]
+async fn ai_get_models(app: AppHandle, provider_id: String) -> Result<Vec<String>, String> {
+    let s = settings::load_settings(&app)?;
+    let provider = s
+        .providers
+        .iter()
+        .find(|p| p.id == provider_id)
+        .ok_or_else(|| format!("未找到 Provider: {}", provider_id))?;
+
+    let base_url = provider
+        .base_url
+        .as_deref()
+        .unwrap_or("http://localhost:11434");
+
+    if provider.provider_type == "ollama" {
+        // Ollama: GET /api/tags
+        let client = reqwest::Client::new();
+        let resp = client
+            .get(format!("{}/api/tags", base_url))
+            .send()
+            .await
+            .map_err(|e| format!("请求失败: {}", e))?;
+        let body: serde_json::Value = resp
+            .json()
+            .await
+            .map_err(|e| format!("解析失败: {}", e))?;
+        let models = body
+            .get("models")
+            .and_then(|m| m.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|m| m.get("name").and_then(|n| n.as_str()).map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default();
+        Ok(models)
+    } else {
+        // OpenAI-compatible: GET /v1/models or /models
+        let keys = settings::load_api_keys(&app).unwrap_or_default();
+        let api_key = keys.get(&provider_id).cloned();
+        let client = reqwest::Client::new();
+        let url = if base_url.contains("/v1") {
+            format!("{}/models", base_url)
+        } else {
+            format!("{}/v1/models", base_url)
+        };
+        let mut req = client.get(&url);
+        if let Some(key) = &api_key {
+            req = req.header("Authorization", format!("Bearer {}", key));
+        }
+        let resp = req.send().await.map_err(|e| format!("请求失败: {}", e))?;
+        let body: serde_json::Value = resp
+            .json()
+            .await
+            .map_err(|e| format!("解析失败: {}", e))?;
+        let models = body
+            .get("data")
+            .and_then(|d| d.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|m| m.get("id").and_then(|n| n.as_str()).map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default();
+        Ok(models)
+    }
+}
+
+/// 验证 API Key
+#[tauri::command]
+async fn provider_validate_key(
+    app: AppHandle,
+    provider_id: String,
+    api_key: String,
+) -> Result<bool, String> {
+    let s = settings::load_settings(&app)?;
+    let provider = s
+        .providers
+        .iter()
+        .find(|p| p.id == provider_id)
+        .ok_or_else(|| format!("未找到 Provider: {}", provider_id))?;
+
+    let base_url = provider
+        .base_url
+        .as_deref()
+        .unwrap_or("");
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .map_err(|e| format!("创建 HTTP 客户端失败: {}", e))?;
+
+    match provider.provider_type.as_str() {
+        "ollama" => {
+            let url = format!(
+                "{}/api/tags",
+                if base_url.is_empty() { "http://localhost:11434" } else { base_url }
+            );
+            let resp = client.get(&url).send().await;
+            Ok(resp.is_ok())
+        }
+        "anthropic" => {
+            let resp = client
+                .get("https://api.anthropic.com/v1/models")
+                .header("x-api-key", &api_key)
+                .header("anthropic-version", "2023-06-01")
+                .send()
+                .await
+                .map_err(|e| format!("验证失败: {}", e))?;
+            Ok(resp.status().is_success())
+        }
+        "deepseek" => {
+            let url = if base_url.is_empty() { "https://api.deepseek.com" } else { base_url };
+            let resp = client
+                .get(format!("{}/v1/models", url.trim_end_matches("/v1")))
+                .header("Authorization", format!("Bearer {}", api_key))
+                .send()
+                .await
+                .map_err(|e| format!("验证失败: {}", e))?;
+            Ok(resp.status().is_success())
+        }
+        _ => {
+            // OpenAI-compatible: test with /models endpoint
+            let url = if !base_url.is_empty() {
+                if base_url.contains("/v1") {
+                    format!("{}/models", base_url)
+                } else {
+                    format!("{}/v1/models", base_url)
+                }
+            } else {
+                "https://api.openai.com/v1/models".to_string()
+            };
+            let resp = client
+                .get(&url)
+                .header("Authorization", format!("Bearer {}", api_key))
+                .send()
+                .await
+                .map_err(|e| format!("验证失败: {}", e))?;
+            Ok(resp.status().is_success())
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     #[test]

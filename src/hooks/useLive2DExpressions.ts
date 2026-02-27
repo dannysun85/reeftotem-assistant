@@ -26,92 +26,39 @@ export const useLive2DExpressions = (): ExpressionReturn => {
    */
   const triggerRandomExpression = useCallback((): boolean => {
     try {
-      console.log('🎭 开始触发表情...');
-
       const appDelegate = LAppDelegate.getInstance();
-      if (!appDelegate) {
-        console.warn('❌ LAppDelegate未初始化');
-        return false;
-      }
+      if (!appDelegate) return false;
 
       const subdelegateList = appDelegate.getSubdelegate();
-      if (!subdelegateList || subdelegateList.getSize() === 0) {
-        console.warn('❌ Subdelegate未初始化或为空');
-        return false;
-      }
+      if (!subdelegateList || subdelegateList.getSize() === 0) return false;
 
       const subdelegate = subdelegateList.at(0);
-      if (!subdelegate) {
-        console.warn('❌ 无法获取第一个Subdelegate');
-        return false;
-      }
+      if (!subdelegate) return false;
 
       const live2dManager = subdelegate.getLive2DManager();
-      if (!live2dManager) {
-        console.warn('❌ Live2D Manager未初始化');
-        return false;
-      }
+      if (!live2dManager) return false;
 
       const modelList = live2dManager._models;
-      if (!modelList || modelList.getSize() === 0) {
-        // 静默失败: 模型可能正在切换中
-        // console.warn('❌ 没有已加载的模型');
-        return false;
-      }
+      if (!modelList || modelList.getSize() === 0) return false;
 
       const model = modelList.at(0);
-      if (!model) {
-        console.warn('❌ 无法获取第一个模型');
-        return false;
-      }
+      if (!model) return false;
 
-      // 检查模型是否完全加载
       const coreModel = model.getModel();
-      if (!coreModel) {
-        console.warn('❌ 模型Core未加载');
-        return false;
-      }
+      if (!coreModel) return false;
 
-      // 检查是否有表情系统
-      if (!model._expressions) {
-        console.warn('❌ 模型没有表情系统');
-        return false;
-      }
+      if (!model._expressions) return false;
 
-      // 检查是否有可用的表情
       const expressionCount = model._expressions.getSize();
-      console.log(`📋 发现 ${expressionCount} 个表情`);
+      if (expressionCount === 0) return false;
 
-      if (expressionCount === 0) {
-        console.warn('⚠️ 模型没有配置任何表情');
-        return false;
-      }
-
-      // 显示可用表情列表
-      console.log('🎭 可用表情列表:');
-      for (let i = 0; i < expressionCount; i++) {
-        try {
-          const expression = model._expressions._keyValues[i];
-          if (expression && expression.first) {
-            console.log(`  - ${expression.first}`);
-          }
-        } catch (e) {
-          console.warn(`  ❌ 无法读取表情 ${i}`);
-        }
-      }
-
-      // 触发随机表情
       if (typeof model.setRandomExpression === 'function') {
-        console.log('🎲 触发随机表情...');
         model.setRandomExpression();
-        console.log('✅ 随机表情触发成功');
         return true;
-      } else {
-        console.warn('❌ setRandomExpression方法不存在');
-        return false;
       }
+      return false;
     } catch (error: any) {
-      console.error('❌ 触发随机表情失败:', error.message);
+      console.error('触发随机表情失败:', error.message);
       return false;
     }
   }, []);
@@ -121,111 +68,55 @@ export const useLive2DExpressions = (): ExpressionReturn => {
    */
   const triggerExpression = useCallback((expressionId: string): boolean => {
     try {
-      console.log(`🎭 触发指定表情: ${expressionId}`);
-
       const appDelegate = LAppDelegate.getInstance();
-      if (!appDelegate) {
-        console.warn('❌ LAppDelegate未初始化');
-        return false;
-      }
+      if (!appDelegate) return false;
 
       const subdelegateList = appDelegate.getSubdelegate();
-      if (!subdelegateList || subdelegateList.getSize() === 0) {
-        console.warn('❌ Subdelegate未初始化或为空');
-        return false;
-      }
+      if (!subdelegateList || subdelegateList.getSize() === 0) return false;
 
       const subdelegate = subdelegateList.at(0);
-      if (!subdelegate) {
-        console.warn('❌ 无法获取第一个Subdelegate');
-        return false;
-      }
+      if (!subdelegate) return false;
 
       const live2dManager = subdelegate.getLive2DManager();
-      if (!live2dManager) {
-        console.warn('❌ Live2D Manager未初始化');
-        return false;
-      }
+      if (!live2dManager) return false;
 
       const modelList = live2dManager._models;
-      if (!modelList || modelList.getSize() === 0) {
-        // 静默失败: 模型可能正在切换中
-        // console.warn('❌ 没有已加载的模型');
-        return false;
-      }
+      if (!modelList || modelList.getSize() === 0) return false;
 
       const model = modelList.at(0);
-      if (!model) {
-        console.warn('❌ 无法获取第一个模型');
-        return false;
-      }
+      if (!model) return false;
 
-      // 检查模型是否完全加载
       const coreModel = model.getModel();
-      if (!coreModel) {
-        console.warn('❌ 模型Core未加载');
-        return false;
-      }
+      if (!coreModel) return false;
 
-      // 检查是否有表情系统
-      if (!model._expressions) {
-        console.warn('❌ 模型没有表情系统');
-        return false;
-      }
+      if (!model._expressions) return false;
 
-      // 检查表情是否存在
       const expressionCount = model._expressions.getSize();
-      if (expressionCount === 0) {
-        console.warn('⚠️ 模型没有配置任何表情');
-        return false;
-      }
+      if (expressionCount === 0) return false;
 
       // 验证表情ID是否有效
       let expressionExists = false;
-      console.log(`🔍 验证表情 "${expressionId}" 是否存在...`);
-
       for (let i = 0; i < expressionCount; i++) {
         try {
           const expression = model._expressions._keyValues[i];
           if (expression && expression.first === expressionId) {
             expressionExists = true;
-            console.log(`✅ 找到表情: ${expressionId}`);
             break;
           }
-        } catch (e) {
-          console.warn(`  ❌ 检查表情 ${i} 时出错`);
+        } catch (_e) {
+          // skip unreadable expression entry
         }
       }
 
-      if (!expressionExists) {
-        console.warn(`⚠️ 表情 "${expressionId}" 不存在`);
-        // 显示可用表情供调试
-        console.log('💡 可用表情:');
-        for (let i = 0; i < expressionCount; i++) {
-          try {
-            const expression = model._expressions._keyValues[i];
-            if (expression && expression.first) {
-              console.log(`  - ${expression.first}`);
-            }
-          } catch (e) {
-            console.warn(`  ❌ 无法读取表情 ${i}`);
-          }
-        }
-        return false;
-      }
+      if (!expressionExists) return false;
 
-      // 触发指定表情
       if (typeof model.setExpression === 'function') {
-        console.log(`🎯 触发表情: ${expressionId}`);
         model.setExpression(expressionId);
-        console.log(`✅ 表情 "${expressionId}" 触发成功`);
         return true;
-      } else {
-        console.warn('❌ setExpression方法不存在');
-        return false;
       }
+      return false;
     } catch (error: any) {
-      console.error(`❌ 触发表情[${expressionId}]失败:`, error.message);
+      console.error(`触发表情[${expressionId}]失败:`, error.message);
       return false;
     }
   }, []);
@@ -235,80 +126,46 @@ export const useLive2DExpressions = (): ExpressionReturn => {
    */
   const getAvailableExpressions = useCallback((): string[] => {
     try {
-      console.log('📋 获取可用表情列表...');
-
       const appDelegate = LAppDelegate.getInstance();
-      if (!appDelegate) {
-        console.warn('❌ LAppDelegate未初始化');
-        return [];
-      }
+      if (!appDelegate) return [];
 
       const subdelegateList = appDelegate.getSubdelegate();
-      if (!subdelegateList || subdelegateList.getSize() === 0) {
-        console.warn('❌ Subdelegate未初始化或为空');
-        return [];
-      }
+      if (!subdelegateList || subdelegateList.getSize() === 0) return [];
 
       const subdelegate = subdelegateList.at(0);
-      if (!subdelegate) {
-        console.warn('❌ 无法获取第一个Subdelegate');
-        return [];
-      }
+      if (!subdelegate) return [];
 
       const live2dManager = subdelegate.getLive2DManager();
-      if (!live2dManager) {
-        console.warn('❌ Live2D Manager未初始化');
-        return [];
-      }
+      if (!live2dManager) return [];
 
       const modelList = live2dManager._models;
-      if (!modelList || modelList.getSize() === 0) {
-        // 静默失败: 模型可能正在切换中
-        // console.warn('❌ 没有已加载的模型');
-        return [];
-      }
+      if (!modelList || modelList.getSize() === 0) return [];
 
       const model = modelList.at(0);
-      if (!model) {
-        console.warn('❌ 无法获取第一个模型');
-        return [];
-      }
+      if (!model) return [];
 
-      // 检查模型是否完全加载
       const coreModel = model.getModel();
-      if (!coreModel) {
-        console.warn('❌ 模型Core未加载');
-        return [];
-      }
+      if (!coreModel) return [];
 
-      // 检查是否有表情系统
-      if (!model._expressions) {
-        console.warn('❌ 模型没有表情系统');
-        return [];
-      }
+      if (!model._expressions) return [];
 
       const expressions: string[] = [];
       const expressionCount = model._expressions.getSize();
-      console.log(`🔍 扫描 ${expressionCount} 个表情...`);
 
       for (let i = 0; i < expressionCount; i++) {
         try {
           const expression = model._expressions._keyValues[i];
           if (expression && expression.first) {
             expressions.push(expression.first);
-            console.log(`  ✅ 找到表情: ${expression.first}`);
-          } else {
-            console.warn(`  ⚠️ 表情 ${i} 数据不完整`);
           }
-        } catch (e: any) {
-          console.warn(`  ❌ 读取表情 ${i} 失败:`, e.message);
+        } catch (_e) {
+          // skip unreadable expression entry
         }
       }
 
-      console.log(`📊 成功获取 ${expressions.length} 个可用表情:`, expressions);
       return expressions;
     } catch (error: any) {
-      console.error('❌ 获取表情列表失败:', error.message);
+      console.error('获取表情列表失败:', error.message);
       return [];
     }
   }, []);

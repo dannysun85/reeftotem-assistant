@@ -1,0 +1,22 @@
+{
+    "title": "MCP Tools",
+    "subtitle": "Browse and test Model Context Protocol tools",
+    "refresh": "Refresh",
+    "noTools": "No MCP tools registered",
+    "noToolsDesc": "Tools will appear here once MCP servers are configured.",
+    "toolCount": "{{count}} tools available",
+    "params": "{{count}} parameters",
+    "noParams": "No parameters",
+    "testTool": "Test Tool",
+    "execute": "Execute",
+    "executing": "Executing...",
+    "result": "Result",
+    "error": "Error",
+    "clearResult": "Clear",
+    "inputLabel": "Input",
+    "outputLabel": "Output",
+    "paramName": "Parameter",
+    "paramType": "Type",
+    "paramRequired": "Required",
+    "enterValue": "Enter value..."
+}

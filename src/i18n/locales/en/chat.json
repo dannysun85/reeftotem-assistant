@@ -1,0 +1,44 @@
+{
+    "offlineNotice": "OpenClaw Offline",
+    "offlineDesc": "OpenClaw will start automatically. Chat is available in local mode.",
+    "welcome": {
+        "title": "ClawX Chat",
+        "subtitle": "Your AI assistant is ready. Start a conversation below.",
+        "askQuestions": "Ask Questions",
+        "askQuestionsDesc": "Get answers on any topic",
+        "creativeTasks": "Creative Tasks",
+        "creativeTasksDesc": "Writing, brainstorming, ideas"
+    },
+    "noLogs": "(No logs available yet)",
+    "toolbar": {
+        "newSession": "New session",
+        "refresh": "Refresh chat",
+        "showThinking": "Show thinking",
+        "hideThinking": "Hide thinking",
+        "showAllSessions": "Show all sessions",
+        "filterByAgent": "Filter sessions by agent",
+        "noAgent": "No agent configured",
+        "selectAgent": "Select agent"
+    },
+    "sessions": {
+        "title": "Chats",
+        "search": "Search..."
+    },
+    "empty": "Send a message to start chatting",
+    "input": {
+        "placeholder": "Type a message..."
+    },
+    "streaming": {
+        "thinking": "AI is thinking...",
+        "abort": "Stop generating"
+    },
+    "mic": {
+        "recording": "Recording...",
+        "processing": "Recognizing..."
+    },
+    "tts": {
+        "speak": "Read aloud",
+        "autoOn": "Disable auto TTS",
+        "autoOff": "Enable auto TTS"
+    }
+}

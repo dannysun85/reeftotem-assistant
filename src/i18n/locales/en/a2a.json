@@ -1,0 +1,39 @@
+{
+    "title": "A2A Delegation",
+    "subtitle": "Agent-to-Agent task delegation",
+    "refresh": "Refresh",
+    "newDelegation": "New Delegation",
+    "noDelegations": "No delegations yet",
+    "noDelegationsDesc": "Create a delegation to assign tasks between agents.",
+    "stats": {
+        "total": "Total",
+        "pending": "Pending",
+        "completed": "Completed",
+        "failed": "Failed"
+    },
+    "card": {
+        "from": "From",
+        "to": "To",
+        "task": "Task",
+        "status": "Status",
+        "created": "Created",
+        "cancel": "Cancel"
+    },
+    "dialog": {
+        "title": "New Delegation",
+        "fromAgent": "From Agent",
+        "toAgent": "To Agent",
+        "task": "Task",
+        "taskPlaceholder": "Describe the task to delegate...",
+        "context": "Context (optional)",
+        "contextPlaceholder": "Provide additional context...",
+        "selectAgent": "Select agent",
+        "create": "Create Delegation",
+        "creating": "Creating..."
+    },
+    "status": {
+        "pending": "Pending",
+        "completed": "Completed",
+        "failed": "Failed"
+    }
+}

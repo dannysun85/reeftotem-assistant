@@ -339,7 +339,7 @@ export class LAppDelegate {
     }
   }
 
-  public startMotion(motionName: string): void {
+  public startMotion(motionName: string, motionIndex?: number): void {
     const model = this.getPrimaryModel();
     if (!model) {
       console.warn('LAppDelegate.startMotion: 当前没有可用模型');
@@ -384,6 +384,15 @@ export class LAppDelegate {
     if (!targetGroup) {
       console.warn('LAppDelegate.startMotion: 未找到可用动作组', motionName);
       return;
+    }
+
+    // 如果指定了 motionIndex 且在有效范围内，播放指定动作；否则随机播放
+    if (motionIndex != null && typeof model.startMotion === 'function') {
+      const count = modelSetting.getMotionCount(targetGroup);
+      if (motionIndex >= 0 && motionIndex < count) {
+        model.startMotion(targetGroup, motionIndex, LAppDefine.PriorityNormal);
+        return;
+      }
     }
 
     if (typeof model.startRandomMotion === 'function') {

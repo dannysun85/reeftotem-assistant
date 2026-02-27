@@ -6,6 +6,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { live2DEngine, Live2DEngineConfig } from '../core/Live2DEngine';
 import { live2DResourceManager, Live2DModelConfig, ResourceLoadState } from '../core/Live2DResourceManager';
+import { Live2DManager } from '@/lib/live2d/Live2DManager';
 
 /**
  * Live2D Hook 状态
@@ -45,7 +46,7 @@ export interface Live2DActions {
 
   // 交互控制
   triggerExpression: (expressionName: string) => void;
-  triggerMotion: (motionName: string) => void;
+  triggerMotion: (motionName: string, motionIndex?: number) => void;
   setEyeTracking: (x: number, y: number) => void;
   setLipSync: (value: number) => void;
 
@@ -198,8 +199,8 @@ export function useLive2D(config?: Partial<Live2DEngineConfig>, options?: { skip
   }, []);
 
   // 触发动作
-  const triggerMotion = useCallback((motionName: string): void => {
-    engineRef.current.triggerMotion(motionName);
+  const triggerMotion = useCallback((motionName: string, motionIndex?: number): void => {
+    engineRef.current.triggerMotion(motionName, motionIndex);
   }, []);
 
   // 设置视线追踪
@@ -207,9 +208,9 @@ export function useLive2D(config?: Partial<Live2DEngineConfig>, options?: { skip
     engineRef.current.setEyeTracking(x, y);
   }, []);
 
-  // 设置唇形同步
+  // 设置唇形同步（通过 Live2DManager 外部口型值，由 model update loop 读取）
   const setLipSync = useCallback((value: number): void => {
-    engineRef.current.setLipSync(value);
+    Live2DManager.getInstance().setExternalLipSync(value);
   }, []);
 
   // 调整画布尺寸

@@ -1,0 +1,42 @@
+{
+    "title": "概览",
+    "description": "AI 助手状态概览",
+    "stats": {
+        "mode": "AI 模式",
+        "directMode": "直连模式",
+        "providers": "服务商",
+        "providersConfigured": "已配置",
+        "agents": "智能体",
+        "agentsCreated": "已创建",
+        "activeAgent": "活跃智能体",
+        "noActiveAgent": "未选择"
+    },
+    "quickActions": "快捷操作",
+    "actions": {
+        "newChat": "新建对话",
+        "addProvider": "添加服务商",
+        "createAgent": "创建智能体",
+        "settings": "设置"
+    },
+    "gateway": "OpenClaw",
+    "channels": "频道",
+    "skills": "技能",
+    "uptime": "运行时间",
+    "port": "端口: {{port}}",
+    "pid": "PID: {{pid}}",
+    "connectedOf": "{{connected}} / {{total}} 已连接",
+    "enabledOf": "{{enabled}} / {{total}} 已启用",
+    "sinceRestart": "自上次重启",
+    "gatewayNotRunning": "OpenClaw 未运行",
+    "connectedChannels": "已连接频道",
+    "noChannels": "未配置频道",
+    "addFirst": "添加你的第一个频道",
+    "activeSkills": "已启用技能",
+    "noSkills": "未启用技能",
+    "enableSome": "启用一些技能",
+    "more": "+{{count}} 更多",
+    "recentActivity": "最近活动",
+    "noProviders": "尚未配置服务商",
+    "noAgents": "尚未创建智能体",
+    "devInfo": "开发者信息"
+}

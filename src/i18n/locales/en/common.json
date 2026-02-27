@@ -1,0 +1,56 @@
+{
+    "sidebar": {
+        "chat": "Chat",
+        "cronTasks": "Cron Tasks",
+        "skills": "Skills",
+        "mcpTools": "MCP Tools",
+        "a2a": "A2A",
+        "channels": "Channels",
+        "dashboard": "Dashboard",
+        "agents": "Agents",
+        "knowledge": "Knowledge",
+        "workflows": "Workflows",
+        "settings": "Settings",
+        "devConsole": "Developer Console"
+    },
+    "actions": {
+        "save": "Save",
+        "cancel": "Cancel",
+        "delete": "Delete",
+        "edit": "Edit",
+        "refresh": "Refresh",
+        "close": "Close",
+        "copy": "Copy",
+        "search": "Search",
+        "confirm": "Confirm",
+        "dismiss": "Dismiss",
+        "load": "Load",
+        "install": "Install",
+        "uninstall": "Uninstall",
+        "enable": "Enable",
+        "disable": "Disable",
+        "back": "Back",
+        "next": "Next",
+        "skip": "Skip",
+        "restart": "Restart"
+    },
+    "status": {
+        "running": "Running",
+        "stopped": "Stopped",
+        "error": "Error",
+        "connected": "Connected",
+        "disconnected": "Disconnected",
+        "enabled": "Enabled",
+        "disabled": "Disabled",
+        "active": "Active",
+        "paused": "Paused",
+        "configured": "Configured",
+        "loading": "Loading...",
+        "saving": "Saving..."
+    },
+    "openclaw": {
+        "notRunning": "OpenClaw Offline",
+        "notRunningDesc": "OpenClaw is starting automatically. Some features may be limited until it is ready.",
+        "warning": "OpenClaw is not running."
+    }
+}

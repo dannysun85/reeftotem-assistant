@@ -1,0 +1,39 @@
+{
+    "title": "A2A 委任",
+    "subtitle": "エージェント間のタスク委任",
+    "refresh": "更新",
+    "newDelegation": "新規委任",
+    "noDelegations": "委任記録がありません",
+    "noDelegationsDesc": "エージェント間でタスクを割り当てるには委任を作成してください。",
+    "stats": {
+        "total": "合計",
+        "pending": "保留中",
+        "completed": "完了",
+        "failed": "失敗"
+    },
+    "card": {
+        "from": "送信元",
+        "to": "送信先",
+        "task": "タスク",
+        "status": "ステータス",
+        "created": "作成日時",
+        "cancel": "キャンセル"
+    },
+    "dialog": {
+        "title": "新規委任",
+        "fromAgent": "送信元エージェント",
+        "toAgent": "送信先エージェント",
+        "task": "タスク",
+        "taskPlaceholder": "委任するタスクを記述...",
+        "context": "コンテキスト（任意）",
+        "contextPlaceholder": "追加のコンテキストを入力...",
+        "selectAgent": "エージェントを選択",
+        "create": "委任を作成",
+        "creating": "作成中..."
+    },
+    "status": {
+        "pending": "保留中",
+        "completed": "完了",
+        "failed": "失敗"
+    }
+}

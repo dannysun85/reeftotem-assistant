@@ -74,7 +74,7 @@
 			"Target": "Parameter",
 			"Name": "LipSync",
 			"Ids": [
-				"ParamMouthOpenY"
+				"ParamMouthA"
 			]
 		}
 	],

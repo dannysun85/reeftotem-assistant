@@ -1,0 +1,42 @@
+{
+    "title": "ダッシュボード",
+    "description": "AI アシスタントの概要",
+    "stats": {
+        "mode": "AI モード",
+        "directMode": "直接モード",
+        "providers": "プロバイダー",
+        "providersConfigured": "設定済み",
+        "agents": "エージェント",
+        "agentsCreated": "作成済み",
+        "activeAgent": "アクティブエージェント",
+        "noActiveAgent": "未選択"
+    },
+    "quickActions": "クイックアクション",
+    "actions": {
+        "newChat": "新規チャット",
+        "addProvider": "プロバイダー追加",
+        "createAgent": "エージェント作成",
+        "settings": "設定"
+    },
+    "gateway": "OpenClaw",
+    "channels": "チャンネル",
+    "skills": "スキル",
+    "uptime": "稼働時間",
+    "port": "ポート: {{port}}",
+    "pid": "PID: {{pid}}",
+    "connectedOf": "{{total}} 中 {{connected}} 接続済み",
+    "enabledOf": "{{total}} 中 {{enabled}} 有効",
+    "sinceRestart": "前回の再起動から",
+    "gatewayNotRunning": "OpenClaw が停止中",
+    "connectedChannels": "接続済みチャンネル",
+    "noChannels": "チャンネルが設定されていません",
+    "addFirst": "最初のチャンネルを追加",
+    "activeSkills": "アクティブなスキル",
+    "noSkills": "有効なスキルがありません",
+    "enableSome": "スキルを有効にする",
+    "more": "+{{count}} 件",
+    "recentActivity": "最近のアクティビティ",
+    "noProviders": "プロバイダーが設定されていません",
+    "noAgents": "エージェントが作成されていません",
+    "devInfo": "開発者情報"
+}

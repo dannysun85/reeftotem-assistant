@@ -593,17 +593,32 @@ export class LAppModel extends CubismUserModel {
     // リップシンクの設定
     if (this._lipsync) {
       let value = 0.0;
-      this._wavFileHandler.update(deltaTimeSeconds);
-      value = this._wavFileHandler.getRms() * Live2DManager.getInstance().getLipFactor();
-      // 解析新的音频数据
-      let audioData = Live2DManager.getInstance().playAudio();
-      if (audioData != null) {
-        this._wavFileHandler.start(audioData);
+
+      // 优先使用外部口型值（来自 TTS 跨窗口驱动）
+      const externalValue = Live2DManager.getInstance().getExternalLipSyncValue();
+      if (externalValue > 0) {
+        value = externalValue;
+        // 一次性诊断日志
+        if (!(this as any)._lipSyncDebugLogged) {
+          (this as any)._lipSyncDebugLogged = true;
+          console.log('[LipSync] model update: 使用外部值', externalValue.toFixed(2),
+            'lipSyncIds:', this._lipSyncIds.getSize());
+          // 5秒后重置，允许再次打印
+          setTimeout(() => { (this as any)._lipSyncDebugLogged = false; }, 5000);
+        }
+      } else {
+        // 内置音频驱动口型（Live2DManager.playAudio 路径）
+        this._wavFileHandler.update(deltaTimeSeconds);
+        value = this._wavFileHandler.getRms() * Live2DManager.getInstance().getLipFactor();
+        let audioData = Live2DManager.getInstance().playAudio();
+        if (audioData != null) {
+          this._wavFileHandler.start(audioData);
+        }
+        if (!Live2DManager.getInstance().isAudioPlaying()) {
+          value = 0.0;
+        }
       }
-      // 同步声音驱动口型
-      if (!Live2DManager.getInstance().isAudioPlaying()) {
-        value = 0.0;
-      }
+
       for (let i = 0; i < this._lipSyncIds.getSize(); ++i) {
         this._model.addParameterValueById(this._lipSyncIds.at(i), value, 0.8);
       }

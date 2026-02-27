@@ -1,6 +1,6 @@
 # Reeftotem Assistant 文档中心
 
-> Reeftotem Assistant v0.2.0-alpha - 基于 Tauri + React 的 Live2D 语音助手应用
+> Reeftotem Assistant v0.2.0 - 基于 Tauri + React 的 Live2D AI 数字人助手
 
 ## 文档导航
 
@@ -24,6 +24,9 @@
 
 | 文档 | 说明 |
 |------|------|
+| [ClawX 融合总方案](./development/clawx-integration-plan.md) | ClawX 全功能融入 Reeftotem 的完整架构方案 |
+| [页面迁移详细指南](./development/page-migration-guide.md) | ClawX 各页面到 Reeftotem 的逐页迁移指南 |
+| [数字人深度融合设计](./development/live2d-fusion-design.md) | Live2D 数字人与各功能模块的融合交互设计 |
 | [AI 数字人助手开发计划](./development/live2d-development-plan.md) | 双窗口架构、四阶段开发规划和里程碑 |
 | [语音交互开发计划](./development/voice-interaction-plan.md) | 语音识别、合成、Live2D 同步集成计划 |
 
@@ -31,6 +34,11 @@
 
 | 文档 | 说明 |
 |------|------|
+| [Gateway 集成设计](./modules/gateway-integration.md) | OpenClaw Gateway sidecar 集成、WebSocket 协议、Provider 管理 |
+| [知识库 & RAG](./modules/knowledge-rag.md) | 文档解析、向量化、语义检索模块设计 |
+| [工作流引擎](./modules/workflow-engine.md) | DAG 可视化工作流编辑与执行 |
+| [多渠道通信](./modules/channels.md) | 11 平台渠道管理与消息处理 |
+| [技能市场](./modules/skills-system.md) | ClawHub 技能生态与 Python 运行环境 |
 | [Tauri 后端模块](./modules/tauri-backend.md) | Rust 后端窗口管理、托盘菜单、边缘检测 |
 
 ### 问题修复记录
@@ -43,12 +51,6 @@
 | [WebSocket ASR 迁移](./fixes/websocket-asr-migration.md) | 从 REST API 迁移到 WebSocket 实时识别 |
 | [音频转换修复](./fixes/audio-conversion-fix.md) | Float32 到 Int16 转换导致的 4007 错误修复 |
 
-### 其他
-
-| 文档 | 说明 |
-|------|------|
-| [模型显示修改备份](./backup-model-display.md) | 模型显示相关代码修改备份和恢复说明 |
-
 ## 项目结构
 
 ```
@@ -57,16 +59,23 @@ docs/
 ├── getting-started.md                          # 快速入门
 ├── architecture.md                             # 项目架构总览
 ├── project-evaluation.md                       # 项目评估报告
-├── backup-model-display.md                     # 模型显示修改备份
 ├── guides/
 │   ├── tencent-cloud-voice-setup.md            # 腾讯云语音配置
 │   ├── testing-guide.md                        # 测试指南
 │   └── cicd-guide.md                           # CI/CD 实施指南
 ├── development/
+│   ├── clawx-integration-plan.md               # ClawX 融合总方案
+│   ├── page-migration-guide.md                 # 页面迁移详细指南
+│   ├── live2d-fusion-design.md                 # 数字人深度融合设计
 │   ├── live2d-development-plan.md              # AI数字人开发计划
 │   └── voice-interaction-plan.md               # 语音交互开发计划
 ├── modules/
-│   └── tauri-backend.md                        # Tauri后端模块文档
+│   ├── gateway-integration.md                  # Gateway 集成设计
+│   ├── knowledge-rag.md                        # 知识库 & RAG
+│   ├── workflow-engine.md                      # 工作流引擎
+│   ├── channels.md                             # 多渠道通信
+│   ├── skills-system.md                        # 技能市场
+│   └── tauri-backend.md                        # Tauri 后端模块
 └── fixes/
     ├── live2d-transparency-analysis.md         # Live2D透明度问题分析
     ├── live2d-transparency-implementation.md   # Live2D透明度修复实施
@@ -83,4 +92,4 @@ docs/
 
 ---
 
-*最后更新: 2026-02-19*
+*最后更新: 2026-02-20*

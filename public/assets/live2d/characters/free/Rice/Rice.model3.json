@@ -35,13 +35,6 @@
 				"ParamEyeLOpen",
 				"ParamEyeROpen"
 			]
-		},
-		{
-			"Target": "Parameter",
-			"Name": "LipSync",
-			"Ids": [
-				"ParamMouthOpenY"
-			]
 		}
 	],
 	"HitAreas": [

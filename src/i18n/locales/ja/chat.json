@@ -1,0 +1,39 @@
+{
+    "offlineNotice": "OpenClaw オフライン",
+    "offlineDesc": "OpenClaw は自動的に起動します。ローカルモードでチャットを利用できます。",
+    "welcome": {
+        "title": "ClawX チャット",
+        "subtitle": "AI アシスタントの準備ができました。下の入力欄から会話を始めましょう。",
+        "askQuestions": "質問する",
+        "askQuestionsDesc": "あらゆるトピックについて回答を得る",
+        "creativeTasks": "クリエイティブタスク",
+        "creativeTasksDesc": "ライティング、ブレスト、アイデア"
+    },
+    "noLogs": "（ログはまだありません）",
+    "toolbar": {
+        "newSession": "新しいセッション",
+        "refresh": "チャットを更新",
+        "showThinking": "思考を表示",
+        "hideThinking": "思考を非表示",
+        "showAllSessions": "すべてのセッションを表示",
+        "filterByAgent": "エージェントでセッションを絞り込み",
+        "noAgent": "エージェント未設定",
+        "selectAgent": "エージェントを選択"
+    },
+    "sessions": {
+        "title": "チャット",
+        "search": "検索..."
+    },
+    "tabs": {
+        "text": "テキストチャット",
+        "voice": "音声"
+    },
+    "empty": "メッセージを送信して会話を始めましょう",
+    "input": {
+        "placeholder": "メッセージを入力..."
+    },
+    "streaming": {
+        "thinking": "AI が考え中...",
+        "abort": "生成を停止"
+    }
+}

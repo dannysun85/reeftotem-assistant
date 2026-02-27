@@ -1,0 +1,39 @@
+{
+    "title": "A2A 委派",
+    "subtitle": "智能体之间的任务委派",
+    "refresh": "刷新",
+    "newDelegation": "新建委派",
+    "noDelegations": "暂无委派记录",
+    "noDelegationsDesc": "创建委派以在智能体之间分配任务。",
+    "stats": {
+        "total": "总计",
+        "pending": "待处理",
+        "completed": "已完成",
+        "failed": "失败"
+    },
+    "card": {
+        "from": "来源",
+        "to": "目标",
+        "task": "任务",
+        "status": "状态",
+        "created": "创建时间",
+        "cancel": "取消"
+    },
+    "dialog": {
+        "title": "新建委派",
+        "fromAgent": "来源智能体",
+        "toAgent": "目标智能体",
+        "task": "任务",
+        "taskPlaceholder": "描述要委派的任务...",
+        "context": "上下文（可选）",
+        "contextPlaceholder": "提供额外的上下文信息...",
+        "selectAgent": "选择智能体",
+        "create": "创建委派",
+        "creating": "创建中..."
+    },
+    "status": {
+        "pending": "待处理",
+        "completed": "已完成",
+        "failed": "失败"
+    }
+}

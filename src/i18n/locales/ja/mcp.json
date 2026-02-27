@@ -1,0 +1,22 @@
+{
+    "title": "MCPツール",
+    "subtitle": "Model Context Protocolツールの閲覧とテスト",
+    "refresh": "更新",
+    "noTools": "登録されたMCPツールがありません",
+    "noToolsDesc": "MCPサーバーを設定すると、ツールがここに表示されます。",
+    "toolCount": "{{count}}個のツールが利用可能",
+    "params": "{{count}}個のパラメータ",
+    "noParams": "パラメータなし",
+    "testTool": "ツールテスト",
+    "execute": "実行",
+    "executing": "実行中...",
+    "result": "結果",
+    "error": "エラー",
+    "clearResult": "クリア",
+    "inputLabel": "入力",
+    "outputLabel": "出力",
+    "paramName": "パラメータ",
+    "paramType": "タイプ",
+    "paramRequired": "必須",
+    "enterValue": "値を入力..."
+}

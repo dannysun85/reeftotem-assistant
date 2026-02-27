@@ -106,6 +106,22 @@ export class Live2DResourceManager {
     };
   }
 
+  /** 模型显示名称映射（与 Rust 托盘保持一致） */
+  private static readonly DISPLAY_NAMES: Record<string, string> = {
+    HaruGreeter: 'Haru Greeter',
+    Haru: 'Haru',
+    Kei: 'Kei',
+    Chitose: 'Chitose',
+    Epsilon: 'Epsilon',
+    Hibiki: 'Hibiki',
+    Hiyori: 'Hiyori',
+    Izumi: 'Izumi',
+    Mao: 'Mao',
+    Rice: 'Rice',
+    Shizuku: 'Shizuku',
+    Tsumiki: 'Tsumiki',
+  };
+
   /**
    * 初始化模型配置
    */
@@ -121,7 +137,7 @@ export class Live2DResourceManager {
       const config: Live2DModelConfig = {
         id: modelName.toLowerCase(),
         name: modelName,
-        displayName: modelName,
+        displayName: Live2DResourceManager.DISPLAY_NAMES[modelName] || modelName,
         modelPath: this.resolveModelPath(modelName),
         texturePaths: []
       };

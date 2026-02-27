@@ -1,0 +1,42 @@
+{
+    "title": "Dashboard",
+    "description": "Overview of your AI assistant",
+    "stats": {
+        "mode": "AI Mode",
+        "directMode": "Direct Mode",
+        "providers": "Providers",
+        "providersConfigured": "configured",
+        "agents": "Agents",
+        "agentsCreated": "created",
+        "activeAgent": "Active Agent",
+        "noActiveAgent": "Not selected"
+    },
+    "quickActions": "Quick Actions",
+    "actions": {
+        "newChat": "New Chat",
+        "addProvider": "Add Provider",
+        "createAgent": "Create Agent",
+        "settings": "Settings"
+    },
+    "gateway": "OpenClaw",
+    "channels": "Channels",
+    "skills": "Skills",
+    "uptime": "Uptime",
+    "port": "Port: {{port}}",
+    "pid": "PID: {{pid}}",
+    "connectedOf": "{{connected}} of {{total}} connected",
+    "enabledOf": "{{enabled}} of {{total}} enabled",
+    "sinceRestart": "Since last restart",
+    "gatewayNotRunning": "OpenClaw not running",
+    "connectedChannels": "Connected Channels",
+    "noChannels": "No channels configured",
+    "addFirst": "Add your first channel",
+    "activeSkills": "Active Skills",
+    "noSkills": "No skills enabled",
+    "enableSome": "Enable some skills",
+    "more": "+{{count}} more",
+    "recentActivity": "Recent Activity",
+    "noProviders": "No providers configured",
+    "noAgents": "No agents created",
+    "devInfo": "Developer Info"
+}

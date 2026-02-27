@@ -1,0 +1,15 @@
+{
+  "identifier": "spotlight-window",
+  "description": "Spotlight quick-launcher window permissions",
+  "windows": ["spotlight"],
+  "permissions": [
+    "core:default",
+    "core:event:allow-emit",
+    "core:event:allow-listen",
+    "core:window:allow-show",
+    "core:window:allow-hide",
+    "core:window:allow-close",
+    "core:window:allow-set-focus",
+    "clipboard-manager:allow-read-text"
+  ]
+}

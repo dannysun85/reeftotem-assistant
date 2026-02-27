@@ -12,6 +12,8 @@ export interface ILive2DManager {
     changeCharacter(character: ResourceModel | null): void;
     setLipFactor(weight: number): void;
     getLipFactor(): number;
+    setExternalLipSync(value: number): void;
+    getExternalLipSyncValue(): number;
     pushAudioQueue(audioData: ArrayBuffer): void;
     popAudioQueue(): ArrayBuffer | null;
     clearAudioQueue(): void;
@@ -30,6 +32,7 @@ export class Live2DManager implements ILive2DManager {
     private _audioIsPlaying: boolean;
     private _audioSource: AudioBufferSourceNode | null;
     private _lipFactor: number;
+    private _externalLipSyncValue: number;
     private _ready: boolean;
     private _config: Live2DConfig | null = null;
     private _lAppDelegate: LAppDelegate | null = null;
@@ -39,6 +42,7 @@ export class Live2DManager implements ILive2DManager {
         this._audioIsPlaying = false;
         this._audioSource = null;
         this._lipFactor = 1.0;
+        this._externalLipSyncValue = 0;
         this._ready = false;
     }
 
@@ -175,6 +179,28 @@ export class Live2DManager implements ILive2DManager {
     }
 
     /**
+     * 设置外部口型同步值 (0.0 ~ 1.0)
+     * 用于从其他窗口（如主窗口的 TTS）驱动口型
+     */
+    public setExternalLipSync(value: number): void {
+        const prev = this._externalLipSyncValue;
+        this._externalLipSyncValue = Math.max(0, Math.min(1, value));
+        // 状态变化时打印日志（开始/结束）
+        if (prev === 0 && value > 0) {
+            console.log('[LipSync] 外部口型同步开始, value:', value.toFixed(2));
+        } else if (prev > 0 && value === 0) {
+            console.log('[LipSync] 外部口型同步结束');
+        }
+    }
+
+    /**
+     * 获取外部口型同步值
+     */
+    public getExternalLipSyncValue(): number {
+        return this._externalLipSyncValue;
+    }
+
+    /**
      * 添加音频到播放队列
      */
     public pushAudioQueue(audioData: ArrayBuffer): void {
@@ -245,7 +271,11 @@ export class Live2DManager implements ILive2DManager {
     public stopAudio(): void {
         this.clearAudioQueue();
         if (this._audioSource) {
-            this._audioSource.stop();
+            try {
+                this._audioSource.stop();
+            } catch {
+                // AudioBufferSourceNode 可能已停止，忽略 InvalidStateError
+            }
             this._audioSource = null;
         }
         this._audioIsPlaying = false;
@@ -288,6 +318,13 @@ export class Live2DManager implements ILive2DManager {
     public dispose(): void {
         this.stopAudio();
         this._ready = false;
+
+        // 关闭 AudioContext 释放系统音频资源
+        if (this._audioContext && this._audioContext.state !== 'closed') {
+            this._audioContext.close().catch((e) => {
+                console.warn('AudioContext close failed:', e);
+            });
+        }
 
         if (this._lAppDelegate) {
             LAppDelegate.releaseInstance();
